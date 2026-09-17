@@ -131,6 +131,9 @@ export class BrowserService {
         validateCoordinate('bootstrapClicks[].x', point.x, this.options.viewport.width);
         validateCoordinate('bootstrapClicks[].y', point.y, this.options.viewport.height);
         await page.mouse.click(point.x, point.y);
+        if (this.options.clickObservationMs > 0) {
+          await page.waitForTimeout(this.options.clickObservationMs);
+        }
         await recorder.waitForQuiet({
           quietMs: this.options.quietWindowMs,
           timeoutMs: this.options.clickSettleTimeoutMs,
@@ -193,6 +196,7 @@ export class BrowserService {
     button = 'left',
     clickCount = 1,
     settleTimeoutMs,
+    observeMs,
   } = {}) {
     const session = this.#getSession(id);
     validateCoordinate('x', x, this.options.viewport.width);
@@ -208,6 +212,11 @@ export class BrowserService {
       clickCount: clampInt(clickCount, 1, 1, 3),
     });
 
+    const observationMs = clampInt(observeMs, this.options.clickObservationMs, 0, 10000);
+    if (observationMs > 0) {
+      await session.page.waitForTimeout(observationMs);
+    }
+
     const quiet = await session.recorder.waitForQuiet({
       quietMs: this.options.quietWindowMs,
       timeoutMs: clampInt(settleTimeoutMs, this.options.clickSettleTimeoutMs, 250, 30000),
@@ -217,7 +226,7 @@ export class BrowserService {
     const events = session.recorder.eventsAfter(marker);
     return {
       sessionId: id,
-      click: { x, y, button, clickCount: clampInt(clickCount, 1, 1, 3), startedAt },
+      click: { x, y, button, clickCount: clampInt(clickCount, 1, 1, 3), observeMs: observationMs, startedAt },
       networkMarkerBefore: marker,
       networkMarkerAfter: session.recorder.marker(),
       quiet,
