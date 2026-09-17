@@ -172,6 +172,7 @@ export class BrowserService {
       fullPage: false,
       animations: 'disabled',
       caret: 'hide',
+      timeout: this.options.navigationTimeoutMs,
     });
 
     return {
