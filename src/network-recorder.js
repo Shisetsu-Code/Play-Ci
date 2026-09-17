@@ -42,6 +42,7 @@ export class NetworkRecorder {
   #stream;
   #lastActivityAt = Date.now();
   #inFlight = 0;
+  #pendingResponseCaptures = 0;
   #closed = false;
 
   constructor(page, {
@@ -122,6 +123,7 @@ export class NetworkRecorder {
         return;
       }
 
+      this.#pendingResponseCaptures += 1;
       try {
         const body = await response.body();
         if (body.byteLength <= this.maxBodyBytes) {
@@ -131,6 +133,9 @@ export class NetworkRecorder {
         }
       } catch (error) {
         this.#emit({ ...base, bodyOmitted: 'unavailable', bodyError: error.message });
+      } finally {
+        this.#pendingResponseCaptures = Math.max(0, this.#pendingResponseCaptures - 1);
+        this.#touch();
       }
     });
 
@@ -166,12 +171,17 @@ export class NetworkRecorder {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
       const quietFor = Date.now() - this.#lastActivityAt;
-      if (this.#inFlight === 0 && quietFor >= quietMs) {
-        return { quiet: true, waitedMs: Date.now() - started, inFlight: 0 };
+      if (this.#inFlight === 0 && this.#pendingResponseCaptures === 0 && quietFor >= quietMs) {
+        return { quiet: true, waitedMs: Date.now() - started, inFlight: 0, pendingResponseCaptures: 0 };
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(100, quietMs)));
     }
-    return { quiet: false, waitedMs: Date.now() - started, inFlight: this.#inFlight };
+    return {
+      quiet: false,
+      waitedMs: Date.now() - started,
+      inFlight: this.#inFlight,
+      pendingResponseCaptures: this.#pendingResponseCaptures,
+    };
   }
 
   async close() {
