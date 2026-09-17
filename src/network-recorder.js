@@ -118,8 +118,11 @@ export class NetworkRecorder {
         headers: redactHeaders(headers, this.captureSensitiveHeaders),
       };
 
+      // Emit status/headers immediately. Playwright guarantees response arrives before
+      // requestfinished, so the correlated response can never be lost behind body IO.
+      this.#emit(base);
+
       if (this.maxBodyBytes <= 0 || !bodyLooksTextual(contentType)) {
-        this.#emit(base);
         return;
       }
 
@@ -127,12 +130,30 @@ export class NetworkRecorder {
       try {
         const body = await response.body();
         if (body.byteLength <= this.maxBodyBytes) {
-          this.#emit({ ...base, bodyEncoding: 'utf8', body: body.toString('utf8') });
+          this.#emit({
+            type: 'responsebody',
+            requestId: base.requestId,
+            url: base.url,
+            bodyEncoding: 'utf8',
+            body: body.toString('utf8'),
+          });
         } else {
-          this.#emit({ ...base, bodyOmitted: 'too_large', bodyBytes: body.byteLength });
+          this.#emit({
+            type: 'responsebody',
+            requestId: base.requestId,
+            url: base.url,
+            bodyOmitted: 'too_large',
+            bodyBytes: body.byteLength,
+          });
         }
       } catch (error) {
-        this.#emit({ ...base, bodyOmitted: 'unavailable', bodyError: error.message });
+        this.#emit({
+          type: 'responsebody',
+          requestId: base.requestId,
+          url: base.url,
+          bodyOmitted: 'unavailable',
+          bodyError: error.message,
+        });
       } finally {
         this.#pendingResponseCaptures = Math.max(0, this.#pendingResponseCaptures - 1);
         this.#touch();
