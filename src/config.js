@@ -28,6 +28,7 @@ export const config = Object.freeze({
   initialSettleMs: intEnv('INITIAL_SETTLE_MS', 1500, { min: 0, max: 30000 }),
   splashTimeoutMs: intEnv('SPLASH_TIMEOUT_MS', 8000, { min: 0, max: 60000 }),
   clickSettleTimeoutMs: intEnv('CLICK_SETTLE_TIMEOUT_MS', 3500, { min: 250, max: 30000 }),
+  clickObservationMs: intEnv('CLICK_OBSERVATION_MS', 600, { min: 0, max: 10000 }),
   quietWindowMs: intEnv('QUIET_WINDOW_MS', 500, { min: 50, max: 10000 }),
   maxBodyBytes: intEnv('MAX_RESPONSE_BODY_BYTES', 2 * 1024 * 1024, { min: 0, max: 50 * 1024 * 1024 }),
   maxMemoryEvents: intEnv('MAX_MEMORY_EVENTS', 10000, { min: 100, max: 100000 }),
