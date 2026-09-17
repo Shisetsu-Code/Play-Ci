@@ -27,11 +27,11 @@ async function listenFixture() {
             action.id = 'action';
             action.textContent = 'ACTION';
             action.style.cssText = 'position:absolute;left:100px;top:100px;width:100px;height:100px';
-            action.onclick = () => fetch('/api/action', {
+            action.onclick = () => setTimeout(() => fetch('/api/action', {
               method: 'POST',
               headers: {'content-type': 'application/json'},
               body: JSON.stringify({command:'test-click'})
-            });
+            }), 250);
             document.body.appendChild(action);
           };
         </script>
@@ -55,6 +55,7 @@ test('skips splash, captures screenshot, clicks viewport coordinate and returns 
     navigationTimeoutMs: 10000,
     initialSettleMs: 50,
     clickSettleTimeoutMs: 2000,
+    clickObservationMs: 400,
     quietWindowMs: 100,
     maxBodyBytes: 1024 * 1024,
     maxMemoryEvents: 1000,
