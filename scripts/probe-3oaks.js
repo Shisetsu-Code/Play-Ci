@@ -12,8 +12,16 @@ try {
     y: 670,
     settleTimeoutMs: 8000,
   });
-  await session.page?.waitForTimeout?.(1500);
-  console.log('ENTER', JSON.stringify(enter, null, 2));
+  console.log('ENTER', JSON.stringify({
+    click: enter.click,
+    requests: enter.requests,
+    responses: enter.responses,
+    screenshot: enter.screenshot,
+  }, null, 2));
+
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  const after = await service.capture(session.id, 'after-enter');
+  console.log('AFTER_ENTER', JSON.stringify(after, null, 2));
 
   await service.closeSession(session.id);
 } finally {
