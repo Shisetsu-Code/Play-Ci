@@ -189,6 +189,7 @@ Environment variables:
 - `INITIAL_SETTLE_MS=1500`
 - `SPLASH_TIMEOUT_MS=8000`
 - `CLICK_SETTLE_TIMEOUT_MS=3500`
+- `CLICK_OBSERVATION_MS=600` — minimum post-click observation window before declaring the network quiet
 - `QUIET_WINDOW_MS=500`
 - `MAX_RESPONSE_BODY_BYTES=2097152`
 - `CAPTURE_SENSITIVE_HEADERS=1` to disable default redaction of cookies/auth headers
