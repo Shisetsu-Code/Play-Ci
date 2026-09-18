@@ -1,0 +1,21 @@
+{
+  "name": "play-ci",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic Playwright screenshot + click + network probe for visual debuggers.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "capture": "node src/cli.js capture",
+    "batch": "node src/cli.js batch",
+    "test": "node --test",
+    "check": "node --check src/server.js && node --check src/browser-service.js && node --check src/network-recorder.js && node --check src/splash-skipper.js && node --check src/target-list.js && node --check src/cli.js && node --check scripts/analyze-targets.js",
+    "analyze:targets": "node scripts/analyze-targets.js"
+  },
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}
