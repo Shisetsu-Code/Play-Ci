@@ -68,30 +68,34 @@ async function validateBuy(mode) {
       client_command_timestamp: Date.now(),
     };
 
-    const marker = internal.recorder.marker();
-    const fetchResult = await internal.page.evaluate(async ({ playUrl, payload }) => {
-      const response = await fetch(playUrl, {
-        method: 'POST',
-        headers: { 'content-type': 'text/plain' },
-        credentials: 'include',
-        body: JSON.stringify(payload),
-      });
-      return { status: response.status };
-    }, { playUrl, payload });
-
-    await internal.recorder.waitForActivityAfter(marker, { timeoutMs: 1000 });
-    await internal.recorder.waitForQuiet({ quietMs: 300, timeoutMs: 5000 });
-    const events = internal.recorder.eventsAfter(marker);
-    const request = events.find((e) =>
-      e.type === 'request' && e.method === 'POST' && (e.url || '').includes('gsc=play')
-    );
-    const response = request ? summarizeResponse(events, request.requestId) : null;
+    const apiResponse = await internal.context.request.post(playUrl, {
+      headers: {
+        'content-type': 'text/plain',
+        'referer': 'https://3oaks.com/',
+      },
+      data: JSON.stringify(payload),
+      failOnStatusCode: false,
+    });
+    const responseText = await apiResponse.text();
+    const responseBody = parseJson(responseText);
+    const response = {
+      status: apiResponse.status(),
+      command: responseBody?.command ?? null,
+      server_status: responseBody?.status ?? null,
+      last_action: responseBody?.context?.last_action ?? null,
+      last_args: responseBody?.context?.last_args ?? null,
+      next_actions: responseBody?.context?.actions ?? null,
+      round_finished: responseBody?.context?.round_finished ?? null,
+      balance: responseBody?.user?.balance ?? null,
+      currency: responseBody?.user?.currency ?? null,
+      error: responseBody?.error ?? null,
+    };
 
     return {
       mode,
       declared_price_multiplier: start.settings?.buy_bonus_prices?.[String(mode)] ?? null,
-      request: request?.postData ? parseJson(request.postData) : null,
-      fetchStatus: fetchResult.status,
+      request: payload,
+      fetchStatus: apiResponse.status(),
       response,
       startBalance: start.user?.balance ?? null,
       denominator: start.settings?.currency_format?.denominator ?? null,
