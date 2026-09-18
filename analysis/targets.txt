@@ -1,0 +1,6 @@
+# One URL per line. Blank lines and # comments are ignored.
+# Edit this file freely; analysis only runs when analysis/trigger.txt changes.
+
+https://3oaks.com/api/v1/games/4_dragon_pearls/play?lang=en
+https://3oaks.com/api/v1/games/coinup_volcano/play?lang=en
+https://3oaks.com/api/v1/games/lucky_penny_3_pots_super_wheel/play?lang=en
