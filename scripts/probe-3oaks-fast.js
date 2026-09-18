@@ -72,7 +72,7 @@ async function validateBuy(mode) {
     const fetchResult = await internal.page.evaluate(async ({ playUrl, payload }) => {
       const response = await fetch(playUrl, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'text/plain' },
         credentials: 'include',
         body: JSON.stringify(payload),
       });
