@@ -4,6 +4,9 @@ on:
   push:
     paths:
       - 'analysis/trigger.txt'
+  pull_request:
+    paths:
+      - 'analysis/trigger.txt'
   workflow_dispatch:
 
 permissions:
