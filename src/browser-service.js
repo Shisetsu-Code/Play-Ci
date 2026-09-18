@@ -197,6 +197,7 @@ export class BrowserService {
     clickCount = 1,
     settleTimeoutMs,
     observeMs,
+    captureScreenshot = true,
   } = {}) {
     const session = this.#getSession(id);
     validateCoordinate('x', x, this.options.viewport.width);
@@ -213,15 +214,15 @@ export class BrowserService {
     });
 
     const observationMs = clampInt(observeMs, this.options.clickObservationMs, 0, 10000);
-    if (observationMs > 0) {
-      await session.page.waitForTimeout(observationMs);
-    }
+    const activity = await session.recorder.waitForActivityAfter(marker, { timeoutMs: observationMs });
 
     const quiet = await session.recorder.waitForQuiet({
       quietMs: this.options.quietWindowMs,
       timeoutMs: clampInt(settleTimeoutMs, this.options.clickSettleTimeoutMs, 250, 30000),
     });
-    const screenshot = await this.capture(id, `click-${Math.round(x)}-${Math.round(y)}`);
+    const screenshot = captureScreenshot
+      ? await this.capture(id, `click-${Math.round(x)}-${Math.round(y)}`)
+      : null;
 
     const events = session.recorder.eventsAfter(marker);
     return {
@@ -229,6 +230,7 @@ export class BrowserService {
       click: { x, y, button, clickCount: clampInt(clickCount, 1, 1, 3), observeMs: observationMs, startedAt },
       networkMarkerBefore: marker,
       networkMarkerAfter: session.recorder.marker(),
+      activity,
       quiet,
       requests: events.filter((event) => event.type === 'request'),
       responses: events.filter((event) => event.type === 'response'),
