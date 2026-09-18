@@ -199,3 +199,32 @@ Environment variables:
 Authorization, cookies, API keys and similar sensitive headers are redacted in logs by default. POST bodies are captured because they are usually the important protocol evidence, so generated artifacts must still be treated as potentially sensitive.
 
 Play-Ci does not infer bets, buys, bonuses or game semantics. It only performs explicit coordinates supplied by the caller and records what the browser actually sent/received.
+
+
+## Analysis queue
+
+Edit `analysis/targets.txt` in GitHub and put one absolute HTTP(S) URL per line. Blank lines and lines beginning with `#` are ignored. Duplicate URLs are removed while preserving order.
+
+Editing the target list does **not** launch a browser run. Analysis starts only when `analysis/trigger.txt` changes (or when the workflow is manually dispatched).
+
+The intended ChatGPT workflow is:
+
+1. You edit `analysis/targets.txt`.
+2. You tell ChatGPT: **analiza**.
+3. ChatGPT reads the current target file, increments `analysis/trigger.txt`, waits for the `Analyze targets` workflow, reads the `play-ci-analysis` artifact and reports the result.
+4. Protocol-first analyzers validate known providers automatically. Unknown protocols are marked `REQUIRES_REVIEW` instead of guessing.
+
+For 3 Oaks, the analyzer extracts the server-declared actions, bets, buy modes, buy prices, boosters and booster prices from `start`, then validates base spin / declared modes in fresh sessions using the same Playwright browser context. No screenshots are taken unless a later review explicitly needs vision.
+
+Local execution:
+
+```powershell
+npm run analyze:targets
+```
+
+Output:
+
+```text
+artifacts/analysis/analysis-report.json
+artifacts/analysis/analysis-report.md
+```
