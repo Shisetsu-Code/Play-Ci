@@ -188,6 +188,17 @@ export class NetworkRecorder {
     return this.#events.filter((event) => event.seq > seq);
   }
 
+  async waitForActivityAfter(seq, { timeoutMs = 800, pollMs = 25 } = {}) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      if (this.#seq > seq) {
+        return { activity: true, waitedMs: Date.now() - started, latest: this.#seq };
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+    return { activity: false, waitedMs: Date.now() - started, latest: this.#seq };
+  }
+
   async waitForQuiet({ quietMs = 500, timeoutMs = 3500 } = {}) {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
