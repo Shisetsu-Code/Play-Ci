@@ -2,7 +2,13 @@ name: CI
 
 on:
   push:
+    paths-ignore:
+      - 'analysis/targets.txt'
+      - 'analysis/trigger.txt'
   pull_request:
+    paths-ignore:
+      - 'analysis/targets.txt'
+      - 'analysis/trigger.txt'
 
 permissions:
   contents: read
