@@ -81,7 +81,7 @@ export class BrowserService {
     };
   }
 
-  async createSession({ url, skipSplash = true, bootstrapClicks = [] } = {}) {
+  async createSession({ url, skipSplash = true, bootstrapClicks = [], captureInitialScreenshot = true } = {}) {
     await this.start();
     const targetUrl = validateHttpUrl(url);
     const id = crypto.randomUUID();
@@ -154,7 +154,7 @@ export class BrowserService {
         timeoutMs: this.options.clickSettleTimeoutMs,
       });
 
-      const screenshot = await this.capture(id, 'ready');
+      const screenshot = captureInitialScreenshot ? await this.capture(id, 'ready') : null;
       return this.#publicSession(session, screenshot);
     } catch (error) {
       await this.closeSession(id).catch(() => {});
