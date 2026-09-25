@@ -259,3 +259,23 @@ It does not require GitHub CLI or a manually configured API token. It uses the r
 
 
 The target list accepts up to **1000 URLs** per run. Execution concurrency remains limited, so a large file is processed in controlled parallel batches rather than opening 1000 Chromium contexts at once.
+
+
+### Adaptive analysis policy
+
+The analyzer treats protocol discovery and runtime execution as separate evidence layers.
+
+- 3 Oaks `start` is the authoritative discovery source for actions, buy modes, boosters, prices and bets.
+- Runtime validation is supplemental and uses the browser's native game client, never a raw replay through Playwright `APIRequestContext`.
+- By default only one representative mode per action type/game is executed. All modes remain listed from `start`.
+- Runtime validation runs in batches of 5 games with at most 2 concurrent browser sessions.
+- Two consecutive provider 403/429 responses open a circuit breaker and remaining runtime checks are deferred instead of generating useless traffic.
+- Deferred provider-block targets are written to `artifacts/analysis/retry-targets.txt`.
+- Unknown transitions such as provider-specific actions outside `spin` / `buy_spin` stay `REQUIRES_REVIEW`.
+
+To force exhaustive runtime execution of every declared mode:
+
+```powershell
+$env:ANALYSIS_VALIDATE_ALL_MODES="1"
+npm run analyze:targets
+```
