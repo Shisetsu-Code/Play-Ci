@@ -158,9 +158,9 @@ export async function dismissThreeOaksStart(page, viewport) {
   return { dismissed: true, method: 'viewport_click' };
 }
 
-export async function invokeThreeOaksTask(page, task) {
+export async function invokeThreeOaksTask(page, task, { clientFamily = 'unknown' } = {}) {
   if (task.kind === 'buy') {
-    return page.evaluate(async (mode) => {
+    return page.evaluate(async ({ mode, clientFamily }) => {
       const usable = (fn) => {
         if (typeof fn !== 'function') return false;
         try {
@@ -172,50 +172,82 @@ export async function invokeThreeOaksTask(page, task) {
       };
 
       const ta = window.TestActions;
-      let preparedBy = null;
-
-      try {
-        if (usable(ta?.openBuyFeaturePopup)) {
-          ta.openBuyFeaturePopup();
-          preparedBy = 'TestActions.openBuyFeaturePopup';
-          await new Promise((resolve) => setTimeout(resolve, 350));
-        } else if (usable(window.app?.board?.buyFeaturePopup?.show)) {
-          window.app.board.buyFeaturePopup.show();
-          preparedBy = 'app.board.buyFeaturePopup.show';
-          await new Promise((resolve) => setTimeout(resolve, 350));
-        }
-      } catch {}
-
-      const candidates = [
+      const directCandidates = [
         ['app.board.buyFeature.actBuyFeature', window.app?.board?.buyFeature],
         ['app.board.buyBonus.actBuyFeature', window.app?.board?.buyBonus],
         ['app.buyBonus.actBuyFeature', window.app?.buyBonus],
       ];
 
-      for (const [name, owner] of candidates) {
-        const fn = owner?.actBuyFeature;
-        if (typeof fn !== 'function') continue;
+      // Ratpack has two generations. Legacy games expose buyBonus and work
+      // directly; modern games expose buyFeature but the actual purchase path
+      // is TestActions.playBuyFeature(mode).
+      if (clientFamily === 'ratpack') {
+        const legacy = window.app?.board?.buyBonus || window.app?.buyBonus;
+        if (usable(legacy?.actBuyFeature)) {
+          try {
+            if (mode == null) legacy.actBuyFeature.call(legacy);
+            else legacy.actBuyFeature.call(legacy, mode);
+            return {
+              invoked: true,
+              hook: legacy === window.app?.board?.buyBonus
+                ? 'app.board.buyBonus.actBuyFeature'
+                : 'app.buyBonus.actBuyFeature',
+              argument: mode,
+            };
+          } catch {}
+        }
 
-        try {
-          if (mode == null) fn.call(owner);
-          else fn.call(owner, mode);
+        if (usable(ta?.playBuyFeature)) {
+          try {
+            if (mode == null) ta.playBuyFeature();
+            else ta.playBuyFeature(mode);
+            return {
+              invoked: true,
+              hook: 'TestActions.playBuyFeature',
+              argument: mode,
+            };
+          } catch {}
+        }
+      }
 
-          return {
-            invoked: true,
-            hook: name,
-            argument: mode,
-            preparedBy,
-          };
-        } catch {}
+      // For the remaining families the direct board method is the native path.
+      if (clientFamily !== 'kendoo') {
+        for (const [name, owner] of directCandidates) {
+          const fn = owner?.actBuyFeature;
+          if (!usable(fn)) continue;
+          try {
+            if (mode == null) fn.call(owner);
+            else fn.call(owner, mode);
+            return {
+              invoked: true,
+              hook: name,
+              argument: mode,
+            };
+          } catch {}
+        }
+
+        if (usable(ta?.playBuyFeature)) {
+          try {
+            if (mode == null) ta.playBuyFeature();
+            else ta.playBuyFeature(mode);
+            return {
+              invoked: true,
+              hook: 'TestActions.playBuyFeature',
+              argument: mode,
+            };
+          } catch {}
+        }
       }
 
       return {
         invoked: false,
-        reason: 'buy_method_missing_or_failed',
+        reason: clientFamily === 'kendoo'
+          ? 'kendoo_confirmation_required'
+          : 'buy_method_missing_or_failed',
         argument: mode,
-        preparedBy,
+        client_family: clientFamily,
       };
-    }, task.mode);
+    }, { mode: task.mode, clientFamily });
   }
 
   if (task.kind === 'booster') {
