@@ -1,0 +1,89 @@
+name: Exhaustive 3Oaks validation
+
+on:
+  push:
+    paths:
+      - 'analysis/exhaustive-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exhaustive-3oaks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      TARGET_FILE: /tmp/shard-targets.txt
+      ANALYSIS_OUTPUT_DIR: artifacts/exhaustive
+      ANALYSIS_RUNTIME_VALIDATION: '1'
+      ANALYSIS_VALIDATE_ALL_MODES: '1'
+      ANALYSIS_VALIDATE_EVERY_TARGET: '1'
+      ANALYSIS_VALIDATE_BASE_SPIN: '0'
+      ANALYSIS_DISCOVERY_CONCURRENCY: '1'
+      ANALYSIS_VALIDATION_CONCURRENCY: '1'
+      ANALYSIS_VALIDATION_BATCH_SIZE: '2'
+      ANALYSIS_VALIDATION_BATCH_DELAY_MS: '800'
+      ANALYSIS_VALIDATION_READY_TIMEOUT_MS: '12000'
+      ANALYSIS_VALIDATION_ACTIVITY_TIMEOUT_MS: '5000'
+      ANALYSIS_MAX_PROVIDER_BLOCK_STREAK: '2'
+      SHARD_COUNT: '12'
+      SHARD_INDEX: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-1.63.0
+      - run: npx playwright install --with-deps chromium
+      - name: Build shard target list
+        shell: bash
+        run: |
+          awk -v shard="$SHARD_INDEX" -v count="$SHARD_COUNT" '
+            /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+            { if ((n % count) == shard) print; n++ }
+          ' analysis/targets.txt > "$TARGET_FILE"
+          echo "Shard $SHARD_INDEX targets: $(wc -l < "$TARGET_FILE")"
+          cat "$TARGET_FILE"
+      - run: npm run analyze:targets
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exhaustive-shard-${{ matrix.shard }}
+          path: artifacts/exhaustive/
+          retention-days: 7
+
+  merge:
+    if: always()
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: exhaustive-shard-*
+          path: merged-input
+          merge-multiple: false
+      - run: node scripts/merge-exhaustive-results.js merged-input artifacts/exhaustive-final
+      - name: Publish summary
+        run: cat artifacts/exhaustive-final/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 3oaks-exhaustive-final
+          path: artifacts/exhaustive-final/
+          retention-days: 30
