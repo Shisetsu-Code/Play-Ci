@@ -373,6 +373,7 @@ export function threeOaksValidationSignature(discovery) {
     discovery?.client_family || 'unknown',
     `actions=${actions.join(',')}`,
     `buy=${(protocol.available_buy_bonus || []).length}`,
+    `fixed_buy=${Number.isFinite(Number(protocol.fixed_buy_multiplier)) ? 1 : 0}`,
     `booster=${(protocol.available_booster || []).length}`,
     `unhandled=${unhandled.join(',')}`,
   ].join('|');
