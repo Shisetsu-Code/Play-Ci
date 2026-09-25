@@ -49,23 +49,9 @@ async function validateInOriginFrame(target) {
     playUrl.searchParams.set('gsc', 'play');
 
     const frames = internal.page.frames().map((frame) => frame.url());
-    const playOrigin = playUrl.origin;
-    const frame = internal.page.frames().find((candidate) => {
-      try { return new URL(candidate.url()).origin === playOrigin; } catch { return false; }
-    });
 
     if (mode == null) {
       return { ...target, protocol, frames, start_frame_url: reqEvent?.frameUrl ?? null, validation: { skipped: 'no_buy_mode' } };
-    }
-
-    if (!frame) {
-      return {
-        ...target,
-        protocol,
-        frames,
-        start_frame_url: reqEvent?.frameUrl ?? null,
-        validation: { error: 'same_origin_frame_missing', play_origin: playOrigin },
-      };
     }
 
     const payload = {
@@ -92,11 +78,14 @@ async function validateInOriginFrame(target) {
     };
 
     const marker = internal.recorder.marker();
-    const result = await frame.evaluate(async ({ url, payload }) => {
+    const result = await internal.page.evaluate(async ({ url, payload }) => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 8000);
       try {
-        const response = await fetch(url, {
+        if (typeof window.__playCiNativeFetch !== 'function') {
+          return { ok: false, error: 'native_fetch_missing' };
+        }
+        const response = await window.__playCiNativeFetch(url, {
           method: 'POST',
           headers: { 'content-type': 'text/plain' },
           credentials: 'include',
@@ -124,7 +113,6 @@ async function validateInOriginFrame(target) {
       protocol,
       frames,
       start_frame_url: reqEvent?.frameUrl ?? null,
-      chosen_frame_url: frame.url(),
       validation: {
         mode,
         declared_multiplier: protocol.buy_bonus_prices?.[String(mode)] ?? null,
