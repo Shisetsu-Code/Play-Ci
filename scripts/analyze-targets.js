@@ -1,28 +1,47 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../src/config.js';
 import { BrowserService } from '../src/browser-service.js';
 import { parseTargetList } from '../src/target-list.js';
+import {
+  extractThreeOaksStart,
+  summarizeThreeOaksStart,
+  buildThreeOaksValidationPlan,
+  classifyThreeOaksPlay,
+  threeOaksNeedsReview,
+} from '../src/providers/three-oaks.js';
 
 const TARGET_FILE = path.resolve(process.env.TARGET_FILE || 'analysis/targets.txt');
 const OUTPUT_DIR = path.resolve(process.env.ANALYSIS_OUTPUT_DIR || 'artifacts/analysis');
-const DISCOVERY_CONCURRENCY = Number.parseInt(process.env.ANALYSIS_DISCOVERY_CONCURRENCY || '4', 10);
-const VALIDATION_CONCURRENCY = Number.parseInt(process.env.ANALYSIS_VALIDATION_CONCURRENCY || '6', 10);
 
-function jsonBody(event) {
-  if (event?.type !== 'responsebody' || !event.body) return null;
-  try {
-    return JSON.parse(event.body);
-  } catch {
-    return null;
-  }
+const DISCOVERY_CONCURRENCY = envInt('ANALYSIS_DISCOVERY_CONCURRENCY', 4, 1, 12);
+const VALIDATION_CONCURRENCY = envInt('ANALYSIS_VALIDATION_CONCURRENCY', 2, 1, 4);
+const VALIDATION_BATCH_SIZE = envInt('ANALYSIS_VALIDATION_BATCH_SIZE', 5, 1, 10);
+const VALIDATION_BATCH_DELAY_MS = envInt('ANALYSIS_VALIDATION_BATCH_DELAY_MS', 2500, 0, 60000);
+const VALIDATION_READY_TIMEOUT_MS = envInt('ANALYSIS_VALIDATION_READY_TIMEOUT_MS', 30000, 5000, 90000);
+const VALIDATION_ACTIVITY_TIMEOUT_MS = envInt('ANALYSIS_VALIDATION_ACTIVITY_TIMEOUT_MS', 5000, 1000, 20000);
+const MAX_PROVIDER_BLOCK_STREAK = envInt('ANALYSIS_MAX_PROVIDER_BLOCK_STREAK', 2, 1, 10);
+const VALIDATE_ALL_MODES = envBool('ANALYSIS_VALIDATE_ALL_MODES', false);
+const VALIDATE_BASE_SPIN = envBool('ANALYSIS_VALIDATE_BASE_SPIN', false);
+
+function envInt(name, fallback, min, max) {
+  const parsed = Number.parseInt(process.env[name] || '', 10);
+  if (!Number.isInteger(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
 }
 
-function pool(items, limit, fn) {
+function envBool(name, fallback) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return fallback;
+  return /^(1|true|yes|on)$/i.test(raw);
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function pool(items, limit, fn) {
   const results = new Array(items.length);
   let cursor = 0;
-  const count = Math.max(1, Math.min(limit, items.length || 1));
+  const workers = Math.max(1, Math.min(limit, items.length || 1));
 
   async function worker() {
     while (true) {
@@ -33,71 +52,25 @@ function pool(items, limit, fn) {
       } catch (error) {
         results[index] = {
           ok: false,
+          status: 'ERROR',
           error: error instanceof Error ? error.message : String(error),
         };
       }
     }
   }
 
-  return Promise.all(Array.from({ length: count }, worker)).then(() => results);
-}
-
-function extractThreeOaksStart(events) {
-  for (const event of events) {
-    const body = jsonBody(event);
-    if (body?.command !== 'start' || !body?.context || !body?.settings) continue;
-
-    const request = events.find((candidate) =>
-      candidate.type === 'request' &&
-      candidate.requestId === event.requestId
-    );
-
-    return {
-      body,
-      requestUrl: request?.url || event.url || null,
-    };
-  }
-  return null;
-}
-
-function firstNumber(value) {
-  if (Array.isArray(value)) return value.find((entry) => Number.isFinite(Number(entry))) ?? null;
-  return Number.isFinite(Number(value)) ? Number(value) : null;
-}
-
-function summarizeThreeOaksStart(start) {
-  const body = start.body;
-  const context = body.context || {};
-  const settings = body.settings || {};
-  const denominator = Number(settings.currency_format?.denominator || 1);
-  const betFactor = firstNumber(settings.bet_factor);
-  const betPerLine = Number(context.spins?.bet_per_line ?? context.last_args?.bet_per_line ?? 0);
-  const displayBet = betFactor && denominator
-    ? (betPerLine * betFactor) / denominator
-    : null;
-
-  return {
-    provider: '3oaks',
-    session_id_present: Boolean(body.session_id),
-    actions: context.actions || [],
-    available_buy_bonus: context.available_buy_bonus || [],
-    available_booster: context.available_booster || [],
-    buy_bonus_prices: settings.buy_bonus_prices || {},
-    booster_prices: settings.booster_prices || {},
-    bets: settings.bets || [],
-    bet_factor: settings.bet_factor ?? null,
-    denominator,
-    initial_bet_per_line: context.spins?.bet_per_line ?? null,
-    initial_lines: context.spins?.lines ?? null,
-    display_bet: displayBet,
-  };
+  await Promise.all(Array.from({ length: workers }, worker));
+  return results;
 }
 
 function summarizeGeneric(events) {
   const observed = [];
   for (const event of events) {
-    const body = jsonBody(event);
+    if (event?.type !== 'responsebody' || !event.body) continue;
+    let body;
+    try { body = JSON.parse(event.body); } catch { continue; }
     if (!body || typeof body !== 'object') continue;
+
     observed.push({
       url: event.url,
       keys: Object.keys(body).slice(0, 30),
@@ -108,61 +81,42 @@ function summarizeGeneric(events) {
   return observed;
 }
 
-function threeOaksPlayUrl(start) {
-  if (!start.requestUrl) throw new Error('3Oaks start request URL was not captured');
-  const url = new URL(start.requestUrl);
-  url.searchParams.set('gsc', 'play');
-  return url.toString();
+function detectThreeOaksClientFamily(events) {
+  for (const event of events) {
+    const url = event?.url || '';
+    const match = url.match(/\/gs\/clients_([^/]+)\//i);
+    if (match) return match[1].toLowerCase();
+  }
+  return 'unknown';
 }
 
-function buildThreeOaksPayload(startBody, kind, mode) {
-  const context = startBody.context || {};
-  const settings = startBody.settings || {};
-  const params = {
-    bet_per_line: context.spins?.bet_per_line,
-    lines: context.spins?.lines,
-  };
+function declaredFeatures(protocol) {
+  const rows = [];
 
-  if (kind === 'buy') {
-    params.selected_mode = mode;
-  } else if (kind === 'booster') {
-    params.ante_bet = Number(settings.booster_prices?.[String(mode)]);
-    params.selected_mode = mode;
+  for (const mode of protocol?.available_buy_bonus || []) {
+    rows.push({
+      kind: 'buy',
+      action: 'buy_spin',
+      mode,
+      multiplier: protocol.buy_bonus_prices?.[String(mode)] ?? null,
+      evidence: 'server_start',
+      status: 'DECLARED',
+    });
   }
 
-  return {
-    command: 'play',
-    request_id: crypto.randomUUID().replaceAll('-', ''),
-    session_id: startBody.session_id,
-    action: {
-      name: kind === 'buy' ? 'buy_spin' : 'spin',
-      params,
-    },
-    set_denominator: 1,
-    quick_spin: 1,
-    sound: true,
-    autogame: false,
-    mobile: '0',
-    portrait: false,
-    fullscreen: true,
-    viewportSize: `${config.viewport.width}x${config.viewport.height}`,
-    client_command_timestamp: Date.now(),
-  };
-}
+  for (const mode of protocol?.available_booster || []) {
+    rows.push({
+      kind: 'booster',
+      action: 'spin',
+      mode,
+      ante_bet: protocol.booster_prices?.[String(mode)] ?? null,
+      multiplier: protocol.booster_prices?.[String(mode)] ?? null,
+      evidence: 'server_start',
+      status: 'DECLARED',
+    });
+  }
 
-function compactThreeOaksResponse(responseBody, httpStatus) {
-  return {
-    http_status: httpStatus,
-    server_status: responseBody?.status ?? null,
-    command: responseBody?.command ?? null,
-    last_action: responseBody?.context?.last_action ?? null,
-    last_args: responseBody?.context?.last_args ?? null,
-    next_actions: responseBody?.context?.actions ?? null,
-    round_finished: responseBody?.context?.round_finished ?? null,
-    balance: responseBody?.user?.balance ?? null,
-    currency: responseBody?.user?.currency ?? null,
-    error: responseBody?.error ?? null,
-  };
+  return rows;
 }
 
 async function discover(service, url) {
@@ -176,17 +130,19 @@ async function discover(service, url) {
   try {
     const internal = service.sessions.get(session.id);
     const events = internal.recorder.eventsAfter(0);
-    const threeOaks = extractThreeOaksStart(events);
+    const start = extractThreeOaksStart(events);
 
-    if (threeOaks) {
+    if (start) {
+      const protocol = summarizeThreeOaksStart(start);
       return {
         ok: true,
         url,
         provider: '3oaks',
-        status: 'DISCOVERED',
+        client_family: detectThreeOaksClientFamily(events),
+        status: threeOaksNeedsReview(protocol) ? 'REQUIRES_REVIEW' : 'DISCOVERED',
         duration_ms: Date.now() - started,
-        protocol: summarizeThreeOaksStart(threeOaks),
-        start: threeOaks,
+        protocol,
+        declared_features: declaredFeatures(protocol),
       };
     }
 
@@ -194,16 +150,201 @@ async function discover(service, url) {
       ok: true,
       url,
       provider: 'unknown',
+      client_family: 'unknown',
       status: 'REQUIRES_REVIEW',
       duration_ms: Date.now() - started,
       observed_json: summarizeGeneric(events),
+      declared_features: [],
     };
   } finally {
     await service.closeSession(session.id);
   }
 }
 
-async function validateThreeOaks(service, discovery, task) {
+async function testActionsShape(page) {
+  return page.evaluate(() => {
+    const raw = window.TestActions;
+    if (!raw) return { kind: 'missing', methods: [] };
+
+    if (typeof raw === 'object') {
+      const methods = Object.getOwnPropertyNames(Object.getPrototypeOf(raw))
+        .filter((name) => typeof raw[name] === 'function');
+      return { kind: 'instance', methods };
+    }
+
+    if (typeof raw === 'function') {
+      const methods = Object.getOwnPropertyNames(raw)
+        .filter((name) => typeof raw[name] === 'function');
+      const sources = {};
+      for (const name of methods) {
+        if (!/buy|shop|spin|start|bonus|option/i.test(name)) continue;
+        sources[name] = Function.prototype.toString.call(raw[name]).slice(0, 600);
+      }
+      return { kind: 'static', methods, sources };
+    }
+
+    return { kind: typeof raw, methods: [] };
+  });
+}
+
+function sourceIsEmptyStub(source) {
+  if (!source) return false;
+  const compact = source.replace(/\s+/g, '');
+  return /\{\}$/.test(compact);
+}
+
+async function waitForNativeClient(internal) {
+  const network = await internal.recorder.waitForQuiet({
+    quietMs: 1200,
+    timeoutMs: VALIDATION_READY_TIMEOUT_MS,
+  });
+
+  if (!network.quiet) {
+    return {
+      ready: false,
+      reason: 'network_never_quiet',
+      network,
+    };
+  }
+
+  await sleep(600);
+
+  const shape = await testActionsShape(internal.page);
+  if (shape.kind === 'missing') {
+    return {
+      ready: false,
+      reason: 'test_actions_missing',
+      network,
+      shape,
+    };
+  }
+
+  return {
+    ready: true,
+    network,
+    shape,
+  };
+}
+
+async function dismissThreeOaksStart(page, shape) {
+  try {
+    if (shape.kind === 'instance') {
+      const closed = await page.evaluate(() => {
+        if (typeof window.TestActions?.closeStartScreen === 'function') {
+          window.TestActions.closeStartScreen();
+          return true;
+        }
+        return false;
+      });
+      if (closed) {
+        await sleep(1200);
+        return 'test_actions';
+      }
+    }
+
+    if (shape.kind === 'static') {
+      const source = shape.sources?.closeStartScreen;
+      if (source && !sourceIsEmptyStub(source)) {
+        const closed = await page.evaluate(() => {
+          if (typeof window.TestActions?.closeStartScreen === 'function') {
+            window.TestActions.closeStartScreen();
+            return true;
+          }
+          return false;
+        });
+        if (closed) {
+          await sleep(1200);
+          return 'test_actions_static';
+        }
+      }
+    }
+  } catch {}
+
+  const viewport = config.viewport;
+  await page.mouse.click(viewport.width / 2, viewport.height - 50);
+  await sleep(1500);
+  return 'viewport_click';
+}
+
+async function invokeBuy(page, shape, task) {
+  if (shape.kind === 'instance') {
+    const supported = shape.methods.includes('playBuyFeature');
+    if (!supported) return { invoked: false, reason: 'buy_hook_missing' };
+
+    await page.evaluate(() => {
+      if (typeof window.TestActions?.openBuyFeaturePopup === 'function') {
+        window.TestActions.openBuyFeaturePopup();
+      }
+    });
+    await sleep(700);
+
+    await page.evaluate((index) => window.TestActions.playBuyFeature(index), task.modeIndex);
+    return { invoked: true, hook: 'TestActions.playBuyFeature', modeIndex: task.modeIndex };
+  }
+
+  if (shape.kind === 'static') {
+    const source = shape.sources?.playBuyFeature;
+    if (!shape.methods.includes('playBuyFeature') || sourceIsEmptyStub(source)) {
+      return { invoked: false, reason: 'static_buy_hook_stub' };
+    }
+
+    await page.evaluate((index) => window.TestActions.playBuyFeature(index), task.modeIndex);
+    return { invoked: true, hook: 'TestActions.playBuyFeature(static)', modeIndex: task.modeIndex };
+  }
+
+  return { invoked: false, reason: 'buy_hook_unavailable' };
+}
+
+async function invokeBooster(page, shape, task) {
+  const result = await page.evaluate(({ mode, modeIndex }) => {
+    const raw = window.TestActions;
+    if (!raw) return { invoked: false, reason: 'test_actions_missing' };
+
+    const object = typeof raw === 'object' ? raw : raw;
+    const names = [
+      'activateShopOption',
+      'selectShopOption',
+      'playShopOption',
+      'activateBooster',
+      'selectBooster',
+    ];
+
+    let selected = null;
+    for (const name of names) {
+      if (typeof object[name] !== 'function') continue;
+      try {
+        object[name](mode);
+        selected = name;
+        break;
+      } catch {
+        try {
+          object[name](modeIndex);
+          selected = name;
+          break;
+        } catch {}
+      }
+    }
+
+    if (!selected) {
+      return { invoked: false, reason: 'booster_hook_missing' };
+    }
+
+    if (typeof object.spin === 'function') {
+      try {
+        object.spin();
+        return { invoked: true, hook: selected, spinHook: 'spin' };
+      } catch (error) {
+        return { invoked: false, reason: 'spin_hook_failed', hook: selected, error: error.message };
+      }
+    }
+
+    return { invoked: false, reason: 'spin_hook_missing', hook: selected };
+  }, { mode: task.mode, modeIndex: task.modeIndex });
+
+  return result;
+}
+
+async function validateNativeTask(service, discovery, task) {
   const started = Date.now();
   const session = await service.createSession({
     url: discovery.url,
@@ -213,80 +354,233 @@ async function validateThreeOaks(service, discovery, task) {
 
   try {
     const internal = service.sessions.get(session.id);
-    const freshStart = extractThreeOaksStart(internal.recorder.eventsAfter(0));
-    if (!freshStart) throw new Error('3Oaks start response missing in validation session');
+    const readiness = await waitForNativeClient(internal);
 
-    const payload = buildThreeOaksPayload(freshStart.body, task.kind, task.mode);
-    const playUrl = threeOaksPlayUrl(freshStart);
-
-    const response = await internal.context.request.post(playUrl, {
-      headers: {
-        'content-type': 'text/plain',
-        referer: 'https://3oaks.com/',
-      },
-      data: JSON.stringify(payload),
-      failOnStatusCode: false,
-    });
-
-    const text = await response.text();
-    let body = null;
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = { raw_text: text.slice(0, 1000) };
+    if (!readiness.ready) {
+      return {
+        ok: false,
+        url: discovery.url,
+        provider: '3oaks',
+        client_family: discovery.client_family,
+        kind: task.kind,
+        mode: task.mode,
+        declared_multiplier: task.declaredMultiplier ?? 1,
+        status: 'DECLARED_CLIENT_NOT_READY',
+        duration_ms: Date.now() - started,
+        readiness,
+      };
     }
 
-    const compact = compactThreeOaksResponse(body, response.status());
-    const accepted =
-      response.status() >= 200 &&
-      response.status() < 300 &&
-      compact.server_status?.code === 'OK';
+    const startDismissal = await dismissThreeOaksStart(internal.page, readiness.shape);
+    const marker = internal.recorder.marker();
+
+    let invocation;
+    if (task.kind === 'buy') {
+      invocation = await invokeBuy(internal.page, readiness.shape, task);
+    } else if (task.kind === 'booster') {
+      invocation = await invokeBooster(internal.page, readiness.shape, task);
+    } else if (task.kind === 'spin') {
+      invocation = await internal.page.evaluate(() => {
+        const raw = window.TestActions;
+        if (raw && typeof raw.spin === 'function') {
+          try {
+            raw.spin();
+            return { invoked: true, hook: 'TestActions.spin' };
+          } catch (error) {
+            return { invoked: false, reason: 'spin_hook_failed', error: error.message };
+          }
+        }
+        return { invoked: false, reason: 'spin_hook_missing' };
+      });
+    } else {
+      invocation = { invoked: false, reason: 'unsupported_task' };
+    }
+
+    if (!invocation?.invoked) {
+      return {
+        ok: false,
+        url: discovery.url,
+        provider: '3oaks',
+        client_family: discovery.client_family,
+        kind: task.kind,
+        mode: task.mode,
+        declared_multiplier: task.declaredMultiplier ?? 1,
+        status: 'DECLARED_NATIVE_HOOK_UNAVAILABLE',
+        duration_ms: Date.now() - started,
+        start_dismissal: startDismissal,
+        invocation,
+      };
+    }
+
+    await internal.recorder.waitForActivityAfter(marker, {
+      timeoutMs: VALIDATION_ACTIVITY_TIMEOUT_MS,
+    });
+    await internal.recorder.waitForQuiet({
+      quietMs: 800,
+      timeoutMs: Math.max(5000, VALIDATION_ACTIVITY_TIMEOUT_MS + 4000),
+    });
+
+    let plays = classifyThreeOaksPlay(internal.recorder.eventsAfter(0), marker);
+
+    if (plays.length === 0 && task.kind === 'buy' && readiness.shape.kind === 'instance') {
+      try {
+        await internal.page.evaluate((index) => window.TestActions.playBuyFeature(index), task.modeIndex);
+        await internal.recorder.waitForActivityAfter(marker, {
+          timeoutMs: VALIDATION_ACTIVITY_TIMEOUT_MS,
+        });
+        await internal.recorder.waitForQuiet({
+          quietMs: 800,
+          timeoutMs: Math.max(5000, VALIDATION_ACTIVITY_TIMEOUT_MS + 4000),
+        });
+        plays = classifyThreeOaksPlay(internal.recorder.eventsAfter(0), marker);
+      } catch {}
+    }
+
+    if (plays.length === 0) {
+      return {
+        ok: false,
+        url: discovery.url,
+        provider: '3oaks',
+        client_family: discovery.client_family,
+        kind: task.kind,
+        mode: task.mode,
+        declared_multiplier: task.declaredMultiplier ?? 1,
+        status: 'DECLARED_NATIVE_NO_REQUEST',
+        duration_ms: Date.now() - started,
+        start_dismissal: startDismissal,
+        invocation,
+      };
+    }
+
+    const play = plays.at(-1);
+    const providerBlocked = [403, 429].includes(play.http_status);
 
     return {
-      ok: accepted,
+      ok: play.accepted,
       url: discovery.url,
       provider: '3oaks',
+      client_family: discovery.client_family,
       kind: task.kind,
       mode: task.mode,
+      declared_multiplier: task.declaredMultiplier ?? 1,
+      status: providerBlocked
+        ? 'DEFERRED_PROVIDER_BLOCK'
+        : play.accepted
+          ? 'VALIDATED_NATIVE'
+          : 'NATIVE_REJECTED',
       duration_ms: Date.now() - started,
-      declared_multiplier:
-        task.kind === 'buy'
-          ? freshStart.body.settings?.buy_bonus_prices?.[String(task.mode)] ?? null
-          : task.kind === 'booster'
-            ? freshStart.body.settings?.booster_prices?.[String(task.mode)] ?? null
-            : 1,
-      request: {
-        action: payload.action,
-        set_denominator: payload.set_denominator,
-        quick_spin: payload.quick_spin,
-        autogame: payload.autogame,
+      start_dismissal: startDismissal,
+      invocation,
+      request: play.request,
+      response: {
+        http_status: play.http_status,
+        server_status: play.response?.status ?? null,
+        command: play.response?.command ?? null,
+        last_action: play.response?.context?.last_action ?? null,
+        last_args: play.response?.context?.last_args ?? null,
+        next_actions: play.response?.context?.actions ?? null,
+        round_finished: play.response?.context?.round_finished ?? null,
+        balance: play.response?.user?.balance ?? null,
+        currency: play.response?.user?.currency ?? null,
       },
-      response: compact,
     };
   } finally {
     await service.closeSession(session.id);
   }
 }
 
-function validationTasks(discoveries) {
-  const tasks = [];
-  for (const discovery of discoveries) {
-    if (!discovery?.ok || discovery.provider !== '3oaks') continue;
+function validationGroups(discoveries) {
+  return discoveries
+    .filter((entry) => entry?.ok && entry.provider === '3oaks')
+    .map((discovery) => ({
+      discovery,
+      tasks: buildThreeOaksValidationPlan(discovery, {
+        validateBaseSpin: VALIDATE_BASE_SPIN,
+        validateAllModes: VALIDATE_ALL_MODES,
+      }),
+    }))
+    .filter((group) => group.tasks.length > 0);
+}
 
-    const protocol = discovery.protocol || {};
-    if ((protocol.actions || []).includes('spin')) {
-      tasks.push({ discovery, kind: 'spin', mode: null });
+async function validateGroup(service, group) {
+  const results = [];
+  for (const task of group.tasks) {
+    results.push(await validateNativeTask(service, group.discovery, task));
+  }
+  return results;
+}
+
+function deferredForGroup(group, reason = 'provider_block_circuit_open') {
+  return group.tasks.map((task) => ({
+    ok: false,
+    url: group.discovery.url,
+    provider: '3oaks',
+    client_family: group.discovery.client_family,
+    kind: task.kind,
+    mode: task.mode,
+    declared_multiplier: task.declaredMultiplier ?? 1,
+    status: 'DEFERRED_PROVIDER_BLOCK',
+    reason,
+  }));
+}
+
+async function runAdaptiveValidation(service, groups) {
+  const results = [];
+  let providerBlockStreak = 0;
+  let circuitOpen = false;
+
+  for (let offset = 0; offset < groups.length; offset += VALIDATION_BATCH_SIZE) {
+    const batch = groups.slice(offset, offset + VALIDATION_BATCH_SIZE);
+
+    if (circuitOpen) {
+      for (const group of batch) results.push(...deferredForGroup(group));
+      continue;
     }
 
-    for (const mode of protocol.available_booster || []) {
-      tasks.push({ discovery, kind: 'booster', mode });
+    const batchResults = await pool(batch, VALIDATION_CONCURRENCY, (group) => validateGroup(service, group));
+
+    for (const groupResults of batchResults) {
+      for (const item of groupResults || []) {
+        results.push(item);
+        if (item?.status === 'DEFERRED_PROVIDER_BLOCK') {
+          providerBlockStreak += 1;
+        } else if (item?.status === 'VALIDATED_NATIVE') {
+          providerBlockStreak = 0;
+        }
+
+        if (providerBlockStreak >= MAX_PROVIDER_BLOCK_STREAK) {
+          circuitOpen = true;
+        }
+      }
     }
 
-    for (const mode of protocol.available_buy_bonus || []) {
-      tasks.push({ discovery, kind: 'buy', mode });
+    if (circuitOpen) {
+      const remaining = groups.slice(offset + VALIDATION_BATCH_SIZE);
+      for (const group of remaining) results.push(...deferredForGroup(group));
+      break;
+    }
+
+    if (offset + VALIDATION_BATCH_SIZE < groups.length && VALIDATION_BATCH_DELAY_MS > 0) {
+      await sleep(VALIDATION_BATCH_DELAY_MS);
     }
   }
-  return tasks;
+
+  return {
+    results,
+    circuit_open: circuitOpen,
+    provider_block_streak: providerBlockStreak,
+  };
+}
+
+function publicTarget(target) {
+  return target;
+}
+
+function countDeclared(targets, kind) {
+  return targets.reduce(
+    (sum, target) => sum + (target.declared_features || []).filter((row) => row.kind === kind).length,
+    0,
+  );
 }
 
 function markdown(report) {
@@ -297,16 +591,30 @@ function markdown(report) {
     `Targets: ${report.targets.length}`,
     `Duration: ${(report.duration_ms / 1000).toFixed(2)} s`,
     '',
+    '## Summary',
+    '',
+    `- Discovered: ${report.summary.discovered}/${report.summary.total_targets}`,
+    `- Requires review: ${report.summary.requires_review}`,
+    `- Declared buy modes: ${report.summary.declared_buy_modes}`,
+    `- Declared booster modes: ${report.summary.declared_booster_modes}`,
+    `- Runtime validations attempted: ${report.summary.runtime_attempted}`,
+    `- Runtime validated: ${report.summary.runtime_validated}`,
+    `- Runtime unavailable/no request: ${report.summary.runtime_unavailable}`,
+    `- Provider-block deferred: ${report.summary.runtime_deferred}`,
+    `- Runtime rejected: ${report.summary.runtime_rejected}`,
+    '',
   ];
 
   for (const target of report.targets) {
     lines.push(`## ${target.url}`, '');
     lines.push(`- Provider: ${target.provider || 'unknown'}`);
-    lines.push(`- Status: ${target.status || (target.ok ? 'OK' : 'FAILED')}`);
+    lines.push(`- Client family: ${target.client_family || 'unknown'}`);
+    lines.push(`- Status: ${target.status || (target.ok ? 'DISCOVERED' : 'ERROR')}`);
     lines.push(`- Discovery: ${target.duration_ms ?? '?'} ms`);
 
     if (target.protocol) {
       lines.push(`- Actions: ${JSON.stringify(target.protocol.actions || [])}`);
+      lines.push(`- Unhandled actions: ${JSON.stringify(target.protocol.unhandled_actions || [])}`);
       lines.push(`- Buy modes: ${JSON.stringify(target.protocol.available_buy_bonus || [])}`);
       lines.push(`- Buy prices: ${JSON.stringify(target.protocol.buy_bonus_prices || {})}`);
       lines.push(`- Boosters: ${JSON.stringify(target.protocol.available_booster || [])}`);
@@ -315,10 +623,10 @@ function markdown(report) {
 
     const validations = report.validations.filter((entry) => entry.url === target.url);
     if (validations.length) {
-      lines.push('', 'Validations:');
+      lines.push('', 'Runtime validation (representative by default):');
       for (const item of validations) {
         lines.push(
-          `- ${item.kind}${item.mode == null ? '' : ` mode ${item.mode}`}: ${item.ok ? 'OK' : 'FAILED'}; HTTP ${item.response?.http_status ?? '?'}; multiplier ${item.declared_multiplier ?? '?'}`
+          `- ${item.kind}${item.mode == null ? '' : ` mode ${item.mode}`}: ${item.status}; HTTP ${item.response?.http_status ?? '-'}; multiplier ${item.declared_multiplier ?? '-'}`
         );
       }
     }
@@ -332,47 +640,72 @@ function markdown(report) {
 const runStarted = Date.now();
 const targetText = await fs.readFile(TARGET_FILE, 'utf8');
 const urls = parseTargetList(targetText);
-if (urls.length === 0) {
-  throw new Error(`No targets found in ${TARGET_FILE}`);
-}
+if (urls.length === 0) throw new Error(`No targets found in ${TARGET_FILE}`);
 
 const service = new BrowserService(config);
 await service.start();
 
 try {
   const discoveries = await pool(urls, DISCOVERY_CONCURRENCY, (url) => discover(service, url));
-  const tasks = validationTasks(discoveries);
-  const validations = await pool(
-    tasks,
-    VALIDATION_CONCURRENCY,
-    ({ discovery, kind, mode }) => validateThreeOaks(service, discovery, { kind, mode }),
-  );
+  const groups = validationGroups(discoveries);
+  const adaptive = await runAdaptiveValidation(service, groups);
+  const validations = adaptive.results;
+  const targets = discoveries.map(publicTarget);
 
-  const publicDiscoveries = discoveries.map((entry) => {
-    if (!entry?.start) return entry;
-    const { start, ...rest } = entry;
-    return rest;
-  });
+  const runtimeUnavailableStatuses = new Set([
+    'DECLARED_CLIENT_NOT_READY',
+    'DECLARED_NATIVE_HOOK_UNAVAILABLE',
+    'DECLARED_NATIVE_NO_REQUEST',
+  ]);
 
   const report = {
     generated_at: new Date().toISOString(),
     target_file: path.relative(process.cwd(), TARGET_FILE),
     duration_ms: Date.now() - runStarted,
-    targets: publicDiscoveries,
+    policy: {
+      discovery_concurrency: DISCOVERY_CONCURRENCY,
+      validation_concurrency: VALIDATION_CONCURRENCY,
+      validation_batch_size: VALIDATION_BATCH_SIZE,
+      validation_batch_delay_ms: VALIDATION_BATCH_DELAY_MS,
+      validate_all_modes: VALIDATE_ALL_MODES,
+      validate_base_spin: VALIDATE_BASE_SPIN,
+      max_provider_block_streak: MAX_PROVIDER_BLOCK_STREAK,
+      runtime_validation_role: 'supplemental; server start declarations remain authoritative discovery evidence',
+    },
+    validation_circuit: {
+      open: adaptive.circuit_open,
+      provider_block_streak: adaptive.provider_block_streak,
+    },
+    targets,
     validations,
     summary: {
       total_targets: urls.length,
-      discovered: publicDiscoveries.filter((entry) => entry?.ok).length,
-      requires_review: publicDiscoveries.filter((entry) => entry?.status === 'REQUIRES_REVIEW').length,
-      validation_total: validations.length,
-      validation_ok: validations.filter((entry) => entry?.ok).length,
-      validation_failed: validations.filter((entry) => !entry?.ok).length,
+      discovered: targets.filter((entry) => entry?.ok).length,
+      requires_review: targets.filter((entry) => entry?.status === 'REQUIRES_REVIEW').length,
+      declared_buy_modes: countDeclared(targets, 'buy'),
+      declared_booster_modes: countDeclared(targets, 'booster'),
+      runtime_attempted: validations.filter((entry) => !entry.reason?.includes('circuit_open')).length,
+      runtime_validated: validations.filter((entry) => entry?.status === 'VALIDATED_NATIVE').length,
+      runtime_unavailable: validations.filter((entry) => runtimeUnavailableStatuses.has(entry?.status)).length,
+      runtime_deferred: validations.filter((entry) => entry?.status === 'DEFERRED_PROVIDER_BLOCK').length,
+      runtime_rejected: validations.filter((entry) => entry?.status === 'NATIVE_REJECTED').length,
     },
   };
 
   await fs.mkdir(OUTPUT_DIR, { recursive: true });
   await fs.writeFile(path.join(OUTPUT_DIR, 'analysis-report.json'), JSON.stringify(report, null, 2), 'utf8');
   await fs.writeFile(path.join(OUTPUT_DIR, 'analysis-report.md'), markdown(report), 'utf8');
+
+  const retryTargets = [...new Set(
+    validations
+      .filter((entry) => entry.status === 'DEFERRED_PROVIDER_BLOCK')
+      .map((entry) => entry.url)
+  )];
+  await fs.writeFile(
+    path.join(OUTPUT_DIR, 'retry-targets.txt'),
+    retryTargets.length ? `${retryTargets.join('\n')}\n` : '',
+    'utf8',
+  );
 
   console.log(JSON.stringify(report.summary));
 } finally {
