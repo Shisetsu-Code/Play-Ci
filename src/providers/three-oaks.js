@@ -52,6 +52,7 @@ export function summarizeThreeOaksStart(start) {
   const actions = Array.isArray(context.actions) ? context.actions : [];
   const buys = Array.isArray(context.available_buy_bonus) ? context.available_buy_bonus : [];
   const boosters = Array.isArray(context.available_booster) ? context.available_booster : [];
+  const fixedBuyMultiplier = Number(settings.freespins_buying_price);
 
   return {
     provider: '3oaks',
@@ -61,6 +62,7 @@ export function summarizeThreeOaksStart(start) {
     available_buy_bonus: buys,
     available_booster: boosters,
     buy_bonus_prices: settings.buy_bonus_prices || {},
+    fixed_buy_multiplier: Number.isFinite(fixedBuyMultiplier) ? fixedBuyMultiplier : null,
     booster_prices: settings.booster_prices || {},
     bets: settings.bets || [],
     bet_factor: settings.bet_factor ?? null,
@@ -133,6 +135,20 @@ export function buildThreeOaksValidationPlan(discovery, {
   }
 
   const buys = protocol.available_buy_bonus || [];
+  if (
+    buys.length === 0 &&
+    (protocol.actions || []).includes('buy_spin') &&
+    Number.isFinite(Number(protocol.fixed_buy_multiplier))
+  ) {
+    tasks.push({
+      kind: 'buy',
+      mode: null,
+      modeIndex: null,
+      fixed: true,
+      declaredMultiplier: Number(protocol.fixed_buy_multiplier),
+    });
+  }
+
   if (buys.length) {
     const selected = validateAllModes ? buys : [buys[0]];
     for (const mode of selected) {
@@ -209,7 +225,11 @@ export function threeOaksReviewReasons(protocol) {
     reasons.push({ code: 'UNHANDLED_ACTION', action });
   }
 
-  if (actions.includes('buy_spin') && buys.length === 0) {
+  if (
+    actions.includes('buy_spin') &&
+    buys.length === 0 &&
+    !Number.isFinite(Number(protocol?.fixed_buy_multiplier))
+  ) {
     reasons.push({ code: 'BUY_ACTION_WITHOUT_DECLARED_MODES' });
   }
 
@@ -255,6 +275,33 @@ export function buildThreeOaksExecutionBlueprints(protocol) {
         command: 'play',
         action: {
           name: 'spin',
+          params: {
+            bet_per_line: '<BET_PER_LINE>',
+            lines: '<LINES>',
+          },
+        },
+      },
+      defaults: { bet_per_line: betPerLine, lines },
+    });
+  }
+
+  if (
+    (protocol?.actions || []).includes('buy_spin') &&
+    (protocol?.available_buy_bonus || []).length === 0 &&
+    Number.isFinite(Number(protocol?.fixed_buy_multiplier))
+  ) {
+    blueprints.push({
+      kind: 'buy',
+      id: 'buy:fixed',
+      mode: null,
+      fixed: true,
+      declared_multiplier: Number(protocol.fixed_buy_multiplier),
+      evidence: 'server_start',
+      confidence: 'declared',
+      request_template: {
+        command: 'play',
+        action: {
+          name: 'buy_spin',
           params: {
             bet_per_line: '<BET_PER_LINE>',
             lines: '<LINES>',
