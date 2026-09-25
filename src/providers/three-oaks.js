@@ -1,4 +1,5 @@
-const RECOGNIZED_ACTIONS = new Set(['spin', 'buy_spin']);
+const RECOGNIZED_ACTIONS = new Set(['spin', 'buy_spin', 'set_params']);
+const AUXILIARY_ACTIONS = new Set(['set_params']);
 
 export function jsonEventBody(event) {
   if (event?.type !== 'responsebody' || !event.body) return null;
@@ -69,6 +70,7 @@ export function summarizeThreeOaksStart(start) {
     provider: '3oaks',
     session_id_present: Boolean(body.session_id),
     actions,
+    auxiliary_actions: actions.filter((action) => AUXILIARY_ACTIONS.has(action)),
     unhandled_actions: actions.filter((action) => !RECOGNIZED_ACTIONS.has(action)),
     available_buy_bonus: buys,
     available_booster: boosters,
