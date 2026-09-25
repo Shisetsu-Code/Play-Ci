@@ -25,4 +25,5 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
       - run: npm run check
+      - run: python3 -m py_compile tools/analysis_gui.py
       - run: npm test
