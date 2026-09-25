@@ -79,6 +79,25 @@ test('skips splash, captures screenshot, clicks viewport coordinate and returns 
     const response = result.responses.find((event) => event.requestId === request.requestId);
     assert.ok(response, 'expected correlated response');
     assert.equal(response.status, 200);
+
+    const internal = service.sessions.get(session.id);
+    const marker = internal.recorder.marker();
+    const nativeStatus = await internal.page.evaluate(async () => {
+      window.fetch = () => Promise.reject(new Error('patched fetch should not be used'));
+      const response = await window.__playCiNativeFetch('/api/action', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ command: 'native-fetch' }),
+      });
+      return response.status;
+    });
+    assert.equal(nativeStatus, 200);
+    await internal.recorder.waitForQuiet({ quietMs: 100, timeoutMs: 2000 });
+    const nativeRequest = internal.recorder.eventsAfter(marker).find(
+      (event) => event.type === 'request' && event.url.endsWith('/api/action')
+    );
+    assert.ok(nativeRequest, 'expected preserved native fetch to emit browser request');
+    assert.equal(nativeRequest.postData, JSON.stringify({ command: 'native-fetch' }));
   } finally {
     await service.stop();
     await fixture.close();
