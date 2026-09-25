@@ -50,7 +50,18 @@ export function summarizeThreeOaksStart(start) {
   const betFactor = firstFinite(settings.bet_factor);
   const betPerLine = Number(context.spins?.bet_per_line ?? context.last_args?.bet_per_line ?? 0);
   const actions = Array.isArray(context.actions) ? context.actions : [];
-  const buys = Array.isArray(context.available_buy_bonus) ? context.available_buy_bonus : [];
+  const declaredBuys = Array.isArray(context.available_buy_bonus) ? context.available_buy_bonus : [];
+  const legacyBuyPrices = Array.isArray(settings.buy_bonus_price)
+    ? settings.buy_bonus_price.map(Number).filter(Number.isFinite)
+    : [];
+  const legacyBuyModes = declaredBuys.length === 0 && legacyBuyPrices.length > 0
+    ? legacyBuyPrices.map((_, index) => index)
+    : [];
+  const buys = declaredBuys.length ? declaredBuys : legacyBuyModes;
+  const modernBuyPrices = settings.buy_bonus_prices || {};
+  const normalizedBuyPrices = declaredBuys.length
+    ? modernBuyPrices
+    : Object.fromEntries(legacyBuyPrices.map((price, index) => [String(index), price]));
   const boosters = Array.isArray(context.available_booster) ? context.available_booster : [];
   const fixedBuyMultiplier = Number(settings.freespins_buying_price);
 
@@ -61,7 +72,19 @@ export function summarizeThreeOaksStart(start) {
     unhandled_actions: actions.filter((action) => !RECOGNIZED_ACTIONS.has(action)),
     available_buy_bonus: buys,
     available_booster: boosters,
-    buy_bonus_prices: settings.buy_bonus_prices || {},
+    buy_bonus_prices: normalizedBuyPrices,
+    buy_mode_encoding: declaredBuys.length
+      ? 'declared_mode'
+      : legacyBuyModes.length
+        ? 'legacy_zero_based_index'
+        : null,
+    buy_price_source: declaredBuys.length
+      ? 'settings.buy_bonus_prices'
+      : legacyBuyModes.length
+        ? 'settings.buy_bonus_price'
+        : Number.isFinite(fixedBuyMultiplier)
+          ? 'settings.freespins_buying_price'
+          : null,
     fixed_buy_multiplier: Number.isFinite(fixedBuyMultiplier) ? fixedBuyMultiplier : null,
     booster_prices: settings.booster_prices || {},
     bets: settings.bets || [],
