@@ -253,3 +253,40 @@ test('fixed-price buy_spin is complete without selected_mode', () => {
   assert.equal(blueprint.declared_multiplier, 100);
   assert.equal('selected_mode' in blueprint.request_template.action.params, false);
 });
+
+
+test('normalizes legacy buy_bonus_price arrays into zero-based buy modes', () => {
+  const start = {
+    body: {
+      command: 'start',
+      session_id: 'legacy',
+      context: {
+        actions: ['spin', 'buy_spin'],
+        available_buy_bonus: [],
+        available_booster: [],
+        spins: { bet_per_line: 20, lines: 5 },
+      },
+      settings: {
+        buy_bonus_price: [50, 100],
+        bets: [1, 2],
+        bet_factor: [5],
+        lines: [5],
+        currency_format: { denominator: 100 },
+      },
+    },
+    request: null,
+  };
+
+  const summary = summarizeThreeOaksStart(start);
+  assert.deepEqual(summary.available_buy_bonus, [0, 1]);
+  assert.deepEqual(summary.buy_bonus_prices, { '0': 50, '1': 100 });
+  assert.equal(summary.buy_mode_encoding, 'legacy_zero_based_index');
+  assert.equal(summary.buy_price_source, 'settings.buy_bonus_price');
+  assert.equal(threeOaksNeedsReview(summary), false);
+
+  const plan = buildThreeOaksValidationPlan({ protocol: summary }, { validateAllModes: true });
+  assert.deepEqual(plan.map((entry) => [entry.mode, entry.declaredMultiplier]), [
+    [0, 50],
+    [1, 100],
+  ]);
+});
