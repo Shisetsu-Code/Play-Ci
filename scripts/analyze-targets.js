@@ -731,8 +731,8 @@ function buildBetCatalog(targets) {
         evidence: 'server_start',
       })),
       catalog_status:
-        target.provider === '3oaks' && target.ok
-          ? ((protocol.unhandled_actions || []).length ? 'COMPLETE_WITH_REVIEW_ACTION' : 'COMPLETE')
+        target.provider === '3oaks' && target.ok && target.status === 'DISCOVERED'
+          ? 'COMPLETE'
           : 'REQUIRES_REVIEW',
     };
   });
