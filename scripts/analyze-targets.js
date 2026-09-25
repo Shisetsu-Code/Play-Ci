@@ -263,35 +263,28 @@ async function waitForNativeClient(internal) {
 
 async function dismissThreeOaksStart(page, shape) {
   try {
-    if (shape.kind === 'instance') {
-      const closed = await page.evaluate(() => {
-        if (typeof window.TestActions?.closeStartScreen === 'function') {
-          window.TestActions.closeStartScreen();
-          return true;
+    const result = await page.evaluate(() => {
+      const fn = window.TestActions?.closeStartScreen;
+      if (typeof fn === 'function') {
+        const source = Function.prototype.toString.call(fn).replace(/\s+/g, '');
+        if (!/\{\}$/.test(source)) {
+          fn.call(window.TestActions);
+          return 'TestActions.closeStartScreen';
         }
-        return false;
-      });
-      if (closed) {
-        await sleep(1200);
-        return 'test_actions';
       }
-    }
 
-    if (shape.kind === 'static') {
-      const source = shape.sources?.closeStartScreen;
-      if (source && !sourceIsEmptyStub(source)) {
-        const closed = await page.evaluate(() => {
-          if (typeof window.TestActions?.closeStartScreen === 'function') {
-            window.TestActions.closeStartScreen();
-            return true;
-          }
-          return false;
-        });
-        if (closed) {
-          await sleep(1200);
-          return 'test_actions_static';
-        }
+      const skip = window.app?.startScreen?.skip;
+      if (typeof skip === 'function') {
+        skip.call(window.app.startScreen);
+        return 'app.startScreen.skip';
       }
+
+      return null;
+    });
+
+    if (result) {
+      await sleep(1200);
+      return result;
     }
   } catch {}
 
@@ -385,10 +378,10 @@ async function invokeBooster(page, shape, task) {
           ta.openBonusShopPopup();
           await new Promise((resolve) => setTimeout(resolve, 350));
         }
-      } else if (typeof window.GR?.UI?.view?.shop_button?.click === 'function') {
-        const clickHandler = window.GR.UI.view.shop_button.click();
-        if (typeof clickHandler === 'function') {
-          clickHandler();
+      } else {
+        const shopClick = window.GR?.UI?.view?.shop_button?.click?.();
+        if (typeof shopClick === 'function') {
+          shopClick();
           await new Promise((resolve) => setTimeout(resolve, 350));
         }
       }
@@ -404,11 +397,8 @@ async function invokeBooster(page, shape, task) {
       }
     } catch (error) {
       try {
-        if (typeof popup?.activateShopOption === 'function') {
-          popup.activateShopOption(modeIndex);
-        } else if (typeof ta?.activateShopOption === 'function') {
-          ta.activateShopOption(modeIndex);
-        }
+        if (typeof popup?.activateShopOption === 'function') popup.activateShopOption(modeIndex);
+        else if (typeof ta?.activateShopOption === 'function') ta.activateShopOption(modeIndex);
       } catch (fallbackError) {
         return {
           invoked: false,
@@ -421,11 +411,11 @@ async function invokeBooster(page, shape, task) {
     await new Promise((resolve) => setTimeout(resolve, 120));
 
     try {
-      if (typeof ta?.spin === 'function') {
-        ta.spin();
+      if (typeof window.GR?.UI?.Events?.spin === 'function') {
+        window.GR.UI.Events.spin();
         return {
           invoked: true,
-          hook: 'bonusShopPopup.activateShopOption + TestActions.spin',
+          hook: 'bonusShopPopup.activateShopOption + GR.UI.Events.spin',
           argument: mode,
         };
       }
@@ -434,6 +424,14 @@ async function invokeBooster(page, shape, task) {
         return {
           invoked: true,
           hook: 'bonusShopPopup.activateShopOption + app.board.spin',
+          argument: mode,
+        };
+      }
+      if (typeof ta?.spin === 'function') {
+        ta.spin();
+        return {
+          invoked: true,
+          hook: 'bonusShopPopup.activateShopOption + TestActions.spin',
           argument: mode,
         };
       }
@@ -482,14 +480,21 @@ async function validateNativeTask(service, discovery, task) {
       invocation = await invokeBooster(internal.page, readiness.shape, task);
     } else if (task.kind === 'spin') {
       invocation = await internal.page.evaluate(() => {
-        const raw = window.TestActions;
-        if (raw && typeof raw.spin === 'function') {
-          try {
-            raw.spin();
-            return { invoked: true, hook: 'TestActions.spin' };
-          } catch (error) {
-            return { invoked: false, reason: 'spin_hook_failed', error: error.message };
+        try {
+          if (typeof window.GR?.UI?.Events?.spin === 'function') {
+            window.GR.UI.Events.spin();
+            return { invoked: true, hook: 'GR.UI.Events.spin' };
           }
+          if (typeof window.app?.board?.spin === 'function') {
+            window.app.board.spin();
+            return { invoked: true, hook: 'app.board.spin' };
+          }
+          if (typeof window.TestActions?.spin === 'function') {
+            window.TestActions.spin();
+            return { invoked: true, hook: 'TestActions.spin' };
+          }
+        } catch (error) {
+          return { invoked: false, reason: 'spin_hook_failed', error: error.message };
         }
         return { invoked: false, reason: 'spin_hook_missing' };
       });
