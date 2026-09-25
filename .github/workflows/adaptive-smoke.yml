@@ -1,0 +1,43 @@
+name: Adaptive analyzer smoke
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ANALYSIS_DISCOVERY_CONCURRENCY: '3'
+      ANALYSIS_VALIDATION_CONCURRENCY: '2'
+      ANALYSIS_VALIDATION_BATCH_SIZE: '3'
+      ANALYSIS_VALIDATION_BATCH_DELAY_MS: '500'
+      ANALYSIS_VALIDATION_READY_TIMEOUT_MS: '20000'
+      ANALYSIS_VALIDATE_ALL_MODES: '0'
+      ANALYSIS_VALIDATE_BASE_SPIN: '0'
+      TARGET_FILE: '/tmp/play-ci-smoke-targets.txt'
+      ANALYSIS_OUTPUT_DIR: 'artifacts/smoke'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: Prepare targets
+        run: |
+          cat > /tmp/play-ci-smoke-targets.txt <<'EOF'
+          https://3oaks.com/api/v1/games/4_super_clover_pots/play?lang=en
+          https://3oaks.com/api/v1/games/coinup_volcano/play?lang=en
+          https://3oaks.com/api/v1/games/lucky_penny_3_pots_super_wheel/play?lang=en
+          EOF
+      - run: npm run analyze:targets
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: adaptive-smoke
+          path: artifacts/smoke/
+          if-no-files-found: warn
