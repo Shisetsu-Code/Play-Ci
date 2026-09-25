@@ -1,0 +1,49 @@
+name: Fetch latest analysis artifact
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Locate and download latest Analyze targets run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          gh run list \
+            --repo "$REPO" \
+            --workflow analyze-targets.yml \
+            --branch "$BRANCH" \
+            --event push \
+            --limit 10 \
+            --json databaseId,status,conclusion,headSha,createdAt \
+            > /tmp/runs.json
+
+          RUN_ID="$(jq -r '[.[] | select(.status == "completed")][0].databaseId // empty' /tmp/runs.json)"
+          if [ -z "$RUN_ID" ]; then
+            echo "No completed Analyze targets run found" >&2
+            cat /tmp/runs.json >&2
+            exit 1
+          fi
+
+          echo "Latest completed Analyze targets run: $RUN_ID"
+          mkdir -p latest-analysis
+          gh run download "$RUN_ID" \
+            --repo "$REPO" \
+            --name play-ci-analysis \
+            --dir latest-analysis
+          cp /tmp/runs.json latest-analysis/source-runs.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: latest-analysis-copy
+          path: latest-analysis/
+          retention-days: 1
