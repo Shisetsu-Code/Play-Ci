@@ -1,7 +1,7 @@
 name: Validate 3Oaks adapters
 
 on:
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
