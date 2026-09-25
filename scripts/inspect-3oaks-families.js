@@ -1,9 +1,12 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../src/config.js';
 import { BrowserService } from '../src/browser-service.js';
-import { extractThreeOaksStart, summarizeThreeOaksStart } from '../src/providers/three-oaks.js';
+import {
+  extractThreeOaksStart,
+  summarizeThreeOaksStart,
+  classifyThreeOaksPlay,
+} from '../src/providers/three-oaks.js';
 
 const targets = [
   { family: 'hraymo', url: 'https://3oaks.com/api/v1/games/3_african_drums/play?lang=en' },
@@ -16,18 +19,25 @@ const targets = [
 const service = new BrowserService(config);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function parse(text) { try { return JSON.parse(text); } catch { return null; } }
-
-function rawStartRequest(events, start) {
-  if (!start?.request) return null;
-  return events.find((event) =>
-    event.type === 'request' &&
-    event.url === start.request.url &&
-    event.method === start.request.method
-  ) || null;
+async function invokeNativeSpin(page) {
+  return page.evaluate(() => {
+    try {
+      if (typeof window.TestActions?.spin === 'function') {
+        window.TestActions.spin();
+        return { invoked: true, hook: 'TestActions.spin' };
+      }
+      if (typeof window.app?.board?.spin === 'function') {
+        window.app.board.spin();
+        return { invoked: true, hook: 'app.board.spin' };
+      }
+      return { invoked: false, reason: 'spin_hook_missing' };
+    } catch (error) {
+      return { invoked: false, reason: 'spin_hook_failed', error: error?.message || String(error) };
+    }
+  });
 }
 
-async function validateInOriginFrame(target) {
+async function validateViaPatchedSpin(target) {
   const session = await service.createSession({
     url: target.url,
     skipSplash: false,
@@ -36,96 +46,127 @@ async function validateInOriginFrame(target) {
   const internal = service.sessions.get(session.id);
 
   try {
-    const events = internal.recorder.eventsAfter(0);
-    const start = extractThreeOaksStart(events);
-    if (!start?.body || !start?.request?.url) {
-      return { ...target, error: 'start_missing' };
-    }
+    const initialEvents = internal.recorder.eventsAfter(0);
+    const start = extractThreeOaksStart(initialEvents);
+    if (!start?.body) return { ...target, error: 'start_missing' };
 
     const protocol = summarizeThreeOaksStart(start);
     const mode = protocol.available_buy_bonus?.[0];
-    const reqEvent = rawStartRequest(events, start);
-    const playUrl = new URL(start.request.url);
-    playUrl.searchParams.set('gsc', 'play');
-
-    const frames = internal.page.frames().map((frame) => frame.url());
-
     if (mode == null) {
-      return { ...target, protocol, frames, start_frame_url: reqEvent?.frameUrl ?? null, validation: { skipped: 'no_buy_mode' } };
+      return { ...target, protocol, validation: { skipped: 'no_buy_mode' } };
     }
 
-    const payload = {
-      command: 'play',
-      request_id: crypto.randomUUID().replaceAll('-', ''),
-      session_id: start.body.session_id,
-      action: {
-        name: 'buy_spin',
-        params: {
-          bet_per_line: start.body.context.spins.bet_per_line,
-          lines: start.body.context.spins.lines,
-          selected_mode: mode,
-        },
-      },
-      set_denominator: 1,
-      quick_spin: 1,
-      sound: true,
-      autogame: false,
-      mobile: '0',
-      portrait: false,
-      fullscreen: true,
-      viewportSize: `${config.viewport.width}x${config.viewport.height}`,
-      client_command_timestamp: Date.now(),
+    // Give client-side controllers a short bounded time to finish constructing.
+    const deadline = Date.now() + 5000;
+    let spinReady = false;
+    while (Date.now() < deadline) {
+      spinReady = await internal.page.evaluate(() =>
+        typeof window.TestActions?.spin === 'function' ||
+        typeof window.app?.board?.spin === 'function'
+      );
+      if (spinReady) break;
+      await sleep(100);
+    }
+    if (!spinReady) {
+      return { ...target, protocol, validation: { error: 'spin_hook_missing' } };
+    }
+
+    let patchedRequest = null;
+    let patchError = null;
+    let intercepted = false;
+
+    const routeHandler = async (route, request) => {
+      if (intercepted || request.method() !== 'POST' || !request.url().includes('gsc=play')) {
+        await route.continue();
+        return;
+      }
+
+      intercepted = true;
+      try {
+        const original = JSON.parse(request.postData() || '{}');
+        const originalParams = original.action?.params || {};
+        const patched = {
+          ...original,
+          action: {
+            name: 'buy_spin',
+            params: {
+              ...originalParams,
+              bet_per_line: originalParams.bet_per_line ?? start.body.context.spins?.bet_per_line,
+              lines: originalParams.lines ?? start.body.context.spins?.lines,
+              selected_mode: mode,
+            },
+          },
+        };
+        delete patched.action.params.ante_bet;
+        patchedRequest = { original, patched };
+        await route.continue({
+          postData: JSON.stringify(patched),
+          headers: {
+            ...request.headers(),
+            'content-type': 'text/plain',
+          },
+        });
+      } catch (error) {
+        patchError = error?.message || String(error);
+        await route.continue();
+      }
     };
 
+    await internal.page.route('**/*', routeHandler);
     const marker = internal.recorder.marker();
-    const result = await internal.page.evaluate(async ({ url, payload }) => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 8000);
-      try {
-        if (typeof window.__playCiNativeFetch !== 'function') {
-          return { ok: false, error: 'native_fetch_missing' };
-        }
-        const response = await window.__playCiNativeFetch(url, {
-          method: 'POST',
-          headers: { 'content-type': 'text/plain' },
-          credentials: 'include',
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        });
-        const text = await response.text();
-        return { ok: true, status: response.status, text };
-      } catch (error) {
+    const invocation = await invokeNativeSpin(internal.page);
+
+    await internal.recorder.waitForActivityAfter(marker, { timeoutMs: 5000 });
+    await internal.recorder.waitForQuiet({ quietMs: 600, timeoutMs: 8000 });
+    await internal.page.unroute('**/*', routeHandler);
+
+    let plays = classifyThreeOaksPlay(internal.recorder.eventsAfter(0), marker);
+
+    // Some clients keep the splash layer above the board. A single conservative
+    // viewport click followed by the same native spin is the fallback.
+    if (plays.length === 0 && invocation.invoked) {
+      await internal.page.mouse.click(config.viewport.width / 2, config.viewport.height - 50);
+      await sleep(700);
+
+      intercepted = false;
+      patchedRequest = null;
+      patchError = null;
+      await internal.page.route('**/*', routeHandler);
+      const retryMarker = internal.recorder.marker();
+      const retryInvocation = await invokeNativeSpin(internal.page);
+      await internal.recorder.waitForActivityAfter(retryMarker, { timeoutMs: 5000 });
+      await internal.recorder.waitForQuiet({ quietMs: 600, timeoutMs: 8000 });
+      await internal.page.unroute('**/*', routeHandler);
+      plays = classifyThreeOaksPlay(internal.recorder.eventsAfter(0), retryMarker);
+      if (plays.length) {
         return {
-          ok: false,
-          error: error?.name === 'AbortError' ? 'browser_fetch_timeout' : (error?.message || String(error)),
+          ...target,
+          protocol,
+          validation: {
+            mode,
+            declared_multiplier: protocol.buy_bonus_prices?.[String(mode)] ?? null,
+            invocation: retryInvocation,
+            patched: Boolean(patchedRequest),
+            patch_error: patchError,
+            play: plays.at(-1),
+            fallback: 'viewport_click_then_spin',
+          },
         };
-      } finally {
-        clearTimeout(timer);
       }
-    }, { url: playUrl.toString(), payload });
+    }
 
-    await internal.recorder.waitForActivityAfter(marker, { timeoutMs: 1500 });
-    await internal.recorder.waitForQuiet({ quietMs: 400, timeoutMs: 5000 });
-
-    const body = result.text ? parse(result.text) : null;
     return {
       ...target,
       protocol,
-      frames,
-      start_frame_url: reqEvent?.frameUrl ?? null,
       validation: {
         mode,
         declared_multiplier: protocol.buy_bonus_prices?.[String(mode)] ?? null,
-        browser_fetch_ok: result.ok,
-        fetch_error: result.error ?? null,
-        http_status: result.status ?? null,
-        server_status: body?.status ?? null,
-        last_action: body?.context?.last_action ?? null,
-        last_args: body?.context?.last_args ?? null,
-        next_actions: body?.context?.actions ?? null,
-        round_finished: body?.context?.round_finished ?? null,
-        balance: body?.user?.balance ?? null,
-        raw: body ? null : result.text?.slice(0, 500) ?? null,
+        invocation,
+        patched: Boolean(patchedRequest),
+        patch_error: patchError,
+        play: plays.at(-1) ?? null,
+        original_request: patchedRequest?.original ?? null,
+        patched_request: patchedRequest?.patched ?? null,
       },
     };
   } finally {
@@ -137,17 +178,17 @@ await service.start();
 try {
   const results = [];
   for (const target of targets) {
-    results.push(await validateInOriginFrame(target));
-    await sleep(800);
+    results.push(await validateViaPatchedSpin(target));
+    await sleep(900);
   }
 
   await fs.mkdir('artifacts/family-inspection', { recursive: true });
   await fs.writeFile(
-    path.join('artifacts/family-inspection', 'browser-frame-validation.json'),
+    path.join('artifacts/family-inspection', 'patched-spin-validation.json'),
     JSON.stringify(results, null, 2),
     'utf8'
   );
-  console.log('BROWSER_FRAME_VALIDATION', JSON.stringify(results, null, 2));
+  console.log('PATCHED_SPIN_VALIDATION', JSON.stringify(results, null, 2));
 } finally {
   await service.stop();
 }
