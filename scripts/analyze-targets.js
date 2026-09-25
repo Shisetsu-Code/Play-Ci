@@ -14,6 +14,11 @@ import {
   threeOaksValidationSignature,
   threeOaksEffectiveBets,
 } from '../src/providers/three-oaks.js';
+import {
+  waitForThreeOaksCapability,
+  dismissThreeOaksStart as dismissThreeOaksRuntimeStart,
+  invokeThreeOaksTask,
+} from '../src/providers/three-oaks-runtime.js';
 
 const TARGET_FILE = path.resolve(process.env.TARGET_FILE || 'analysis/targets.txt');
 const OUTPUT_DIR = path.resolve(process.env.ANALYSIS_OUTPUT_DIR || 'artifacts/analysis');
@@ -541,7 +546,9 @@ async function validateNativeTask(service, discovery, task) {
 
   try {
     const internal = service.sessions.get(session.id);
-    const readiness = await waitForNativeClient(internal);
+    const readiness = await waitForThreeOaksCapability(internal.page, task, {
+      timeoutMs: VALIDATION_READY_TIMEOUT_MS,
+    });
 
     if (!readiness.ready) {
       return {
@@ -558,38 +565,14 @@ async function validateNativeTask(service, discovery, task) {
       };
     }
 
-    const startDismissal = await dismissThreeOaksStart(internal.page, readiness.shape);
-    const gameplay = await waitForGameplayControls(internal.page);
+    const startDismissal = await dismissThreeOaksRuntimeStart(internal.page, config.viewport);
+    const gameplay = {
+      ready: readiness.ready,
+      waited_ms: readiness.waitedMs,
+      capabilities: readiness.capabilities,
+    };
     const marker = internal.recorder.marker();
-
-    let invocation;
-    if (task.kind === 'buy') {
-      invocation = await invokeBuy(internal.page, readiness.shape, task, discovery.client_family);
-    } else if (task.kind === 'booster') {
-      invocation = await invokeBooster(internal.page, readiness.shape, task);
-    } else if (task.kind === 'spin') {
-      invocation = await internal.page.evaluate(() => {
-        try {
-          if (typeof window.GR?.UI?.Events?.spin === 'function') {
-            window.GR.UI.Events.spin();
-            return { invoked: true, hook: 'GR.UI.Events.spin' };
-          }
-          if (typeof window.app?.board?.spin === 'function') {
-            window.app.board.spin();
-            return { invoked: true, hook: 'app.board.spin' };
-          }
-          if (typeof window.TestActions?.spin === 'function') {
-            window.TestActions.spin();
-            return { invoked: true, hook: 'TestActions.spin' };
-          }
-        } catch (error) {
-          return { invoked: false, reason: 'spin_hook_failed', error: error.message };
-        }
-        return { invoked: false, reason: 'spin_hook_missing' };
-      });
-    } else {
-      invocation = { invoked: false, reason: 'unsupported_task' };
-    }
+    const invocation = await invokeThreeOaksTask(internal.page, task);
 
     if (!invocation?.invoked) {
       return {
