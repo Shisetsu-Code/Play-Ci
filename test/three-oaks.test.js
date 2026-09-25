@@ -9,6 +9,7 @@ import {
   threeOaksReviewReasons,
   buildThreeOaksExecutionBlueprints,
   threeOaksValidationSignature,
+  threeOaksEffectiveBets,
 } from '../src/providers/three-oaks.js';
 
 test('extracts and summarizes 3Oaks start response', () => {
@@ -198,4 +199,23 @@ test('review reasons distinguish structural gaps from price-only gaps', () => {
   assert.ok(
     threeOaksReviewReasons(missingBuyPrice).some((reason) => reason.code === 'BUY_MODE_PRICE_UNDECLARED')
   );
+});
+
+
+test('computes complete effective bet catalog across factors and line modes', () => {
+  const result = threeOaksEffectiveBets({
+    bets: [1, 2],
+    bet_factor: [10, 30],
+    lines: [1, 3],
+    denominator: 100,
+  });
+
+  assert.deepEqual(result.raw_bets, [1, 2]);
+  assert.deepEqual(result.factors, [10, 30]);
+  assert.deepEqual(result.lines, [1, 3]);
+  assert.deepEqual(result.by_factor, [
+    { factor: 10, lines: 1, display_bets: [0.1, 0.2] },
+    { factor: 30, lines: 3, display_bets: [0.3, 0.6] },
+  ]);
+  assert.deepEqual(result.display_bets, [0.1, 0.2, 0.3, 0.6]);
 });
