@@ -9,6 +9,7 @@ import {
   buildThreeOaksValidationPlan,
   classifyThreeOaksPlay,
   threeOaksNeedsReview,
+  threeOaksValidationSignature,
 } from '../src/providers/three-oaks.js';
 
 const TARGET_FILE = path.resolve(process.env.TARGET_FILE || 'analysis/targets.txt');
@@ -490,22 +491,45 @@ async function validateNativeTask(service, discovery, task) {
 }
 
 function validationGroups(discoveries) {
-  return discoveries
-    .filter((entry) => entry?.ok && entry.provider === '3oaks')
-    .map((discovery) => ({
+  const groups = new Map();
+
+  for (const discovery of discoveries) {
+    if (!discovery?.ok || discovery.provider !== '3oaks') continue;
+
+    const tasks = buildThreeOaksValidationPlan(discovery, {
+      validateBaseSpin: VALIDATE_BASE_SPIN,
+      validateAllModes: VALIDATE_ALL_MODES,
+    });
+    if (tasks.length === 0) continue;
+
+    const signature = threeOaksValidationSignature(discovery);
+    const existing = groups.get(signature);
+    if (existing) {
+      existing.covers_urls.push(discovery.url);
+      continue;
+    }
+
+    groups.set(signature, {
+      signature,
       discovery,
-      tasks: buildThreeOaksValidationPlan(discovery, {
-        validateBaseSpin: VALIDATE_BASE_SPIN,
-        validateAllModes: VALIDATE_ALL_MODES,
-      }),
-    }))
-    .filter((group) => group.tasks.length > 0);
+      tasks,
+      covers_urls: [discovery.url],
+    });
+  }
+
+  return [...groups.values()];
 }
 
 async function validateGroup(service, group) {
   const results = [];
   for (const task of group.tasks) {
-    results.push(await validateNativeTask(service, group.discovery, task));
+    const result = await validateNativeTask(service, group.discovery, task);
+    results.push({
+      ...result,
+      validation_signature: group.signature,
+      representative_url: group.discovery.url,
+      covers_urls: group.covers_urls,
+    });
   }
   return results;
 }
@@ -521,6 +545,9 @@ function deferredForGroup(group, reason = 'provider_block_circuit_open') {
     declared_multiplier: task.declaredMultiplier ?? 1,
     status: 'DEFERRED_PROVIDER_BLOCK',
     reason,
+    validation_signature: group.signature,
+    representative_url: group.discovery.url,
+    covers_urls: group.covers_urls,
   }));
 }
 
@@ -602,6 +629,8 @@ function markdown(report) {
     `- Runtime unavailable/no request: ${report.summary.runtime_unavailable}`,
     `- Provider-block deferred: ${report.summary.runtime_deferred}`,
     `- Runtime rejected: ${report.summary.runtime_rejected}`,
+    `- Validation signatures: ${report.summary.validation_signatures}`,
+    `- Targets covered by representative runtime validation: ${report.summary.runtime_covered_targets}`,
     '',
   ];
 
@@ -650,7 +679,13 @@ try {
   const groups = validationGroups(discoveries);
   const adaptive = await runAdaptiveValidation(service, groups);
   const validations = adaptive.results;
-  const targets = discoveries.map(publicTarget);
+  const targets = discoveries.map((target) => ({
+    ...publicTarget(target),
+    validation_signature:
+      target?.ok && target.provider === '3oaks'
+        ? threeOaksValidationSignature(target)
+        : null,
+  }));
 
   const runtimeUnavailableStatuses = new Set([
     'DECLARED_CLIENT_NOT_READY',
@@ -671,6 +706,7 @@ try {
       validate_base_spin: VALIDATE_BASE_SPIN,
       max_provider_block_streak: MAX_PROVIDER_BLOCK_STREAK,
       runtime_validation_role: 'supplemental; server start declarations remain authoritative discovery evidence',
+      runtime_validation_scope: 'one representative game per client/protocol signature by default',
     },
     validation_circuit: {
       open: adaptive.circuit_open,
@@ -689,6 +725,8 @@ try {
       runtime_unavailable: validations.filter((entry) => runtimeUnavailableStatuses.has(entry?.status)).length,
       runtime_deferred: validations.filter((entry) => entry?.status === 'DEFERRED_PROVIDER_BLOCK').length,
       runtime_rejected: validations.filter((entry) => entry?.status === 'NATIVE_REJECTED').length,
+      validation_signatures: groups.length,
+      runtime_covered_targets: new Set(validations.flatMap((entry) => entry?.covers_urls || [])).size,
     },
   };
 
