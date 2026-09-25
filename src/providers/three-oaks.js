@@ -147,8 +147,124 @@ export function classifyThreeOaksPlay(events, marker = 0) {
   });
 }
 
+export function threeOaksReviewReasons(protocol) {
+  const reasons = [];
+  const actions = protocol?.actions || [];
+  const buys = protocol?.available_buy_bonus || [];
+  const boosters = protocol?.available_booster || [];
+  const buyPrices = protocol?.buy_bonus_prices || {};
+  const boosterPrices = protocol?.booster_prices || {};
+
+  for (const action of protocol?.unhandled_actions || []) {
+    reasons.push({ code: 'UNHANDLED_ACTION', action });
+  }
+
+  if (actions.includes('buy_spin') && buys.length === 0) {
+    reasons.push({ code: 'BUY_ACTION_WITHOUT_DECLARED_MODES' });
+  }
+
+  if (buys.length > 0 && !actions.includes('buy_spin')) {
+    reasons.push({ code: 'BUY_MODES_WITHOUT_BUY_ACTION' });
+  }
+
+  for (const mode of buys) {
+    if (buyPrices[String(mode)] == null) {
+      reasons.push({ code: 'BUY_MODE_PRICE_UNDECLARED', mode });
+    }
+  }
+
+  for (const mode of boosters) {
+    const anteBet = Number(boosterPrices[String(mode)]);
+    if (!Number.isFinite(anteBet)) {
+      reasons.push({ code: 'BOOSTER_ANTE_BET_UNDECLARED', mode });
+    }
+  }
+
+  return reasons;
+}
+
 export function threeOaksNeedsReview(protocol) {
-  return Boolean((protocol?.unhandled_actions || []).length);
+  return threeOaksReviewReasons(protocol).some((reason) =>
+    ['UNHANDLED_ACTION', 'BUY_ACTION_WITHOUT_DECLARED_MODES', 'BUY_MODES_WITHOUT_BUY_ACTION', 'BOOSTER_ANTE_BET_UNDECLARED']
+      .includes(reason.code)
+  );
+}
+
+export function buildThreeOaksExecutionBlueprints(protocol) {
+  const blueprints = [];
+  const betPerLine = protocol?.initial_bet_per_line ?? null;
+  const lines = protocol?.initial_lines ?? null;
+
+  if ((protocol?.actions || []).includes('spin')) {
+    blueprints.push({
+      kind: 'spin',
+      id: 'spin',
+      evidence: 'server_start',
+      confidence: 'declared',
+      request_template: {
+        command: 'play',
+        action: {
+          name: 'spin',
+          params: {
+            bet_per_line: '<BET_PER_LINE>',
+            lines: '<LINES>',
+          },
+        },
+      },
+      defaults: { bet_per_line: betPerLine, lines },
+    });
+  }
+
+  for (const mode of protocol?.available_buy_bonus || []) {
+    blueprints.push({
+      kind: 'buy',
+      id: `buy:${mode}`,
+      mode,
+      declared_multiplier: protocol?.buy_bonus_prices?.[String(mode)] ?? null,
+      evidence: 'server_start',
+      confidence: 'declared',
+      request_template: {
+        command: 'play',
+        action: {
+          name: 'buy_spin',
+          params: {
+            bet_per_line: '<BET_PER_LINE>',
+            lines: '<LINES>',
+            selected_mode: mode,
+          },
+        },
+      },
+      defaults: { bet_per_line: betPerLine, lines },
+    });
+  }
+
+  for (const mode of protocol?.available_booster || []) {
+    const anteBet = Number(protocol?.booster_prices?.[String(mode)]);
+    blueprints.push({
+      kind: 'booster',
+      id: `booster:${mode}`,
+      mode,
+      ante_bet: Number.isFinite(anteBet) ? anteBet : null,
+      declared_multiplier: Number.isFinite(anteBet) ? anteBet : null,
+      evidence: 'server_start',
+      confidence: 'declared',
+      request_template: {
+        command: 'play',
+        action: {
+          name: 'spin',
+          params: {
+            bet_per_line: '<BET_PER_LINE>',
+            lines: '<LINES>',
+            ante_bet: Number.isFinite(anteBet) ? anteBet : '<ANTE_BET>',
+            selected_mode: mode,
+          },
+        },
+      },
+      defaults: { bet_per_line: betPerLine, lines },
+    });
+  }
+
+  return blueprints;
 }
 
 
