@@ -93,17 +93,25 @@ async function validateInOriginFrame(target) {
 
     const marker = internal.recorder.marker();
     const result = await frame.evaluate(async ({ url, payload }) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
       try {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'content-type': 'text/plain' },
           credentials: 'include',
           body: JSON.stringify(payload),
+          signal: controller.signal,
         });
         const text = await response.text();
         return { ok: true, status: response.status, text };
       } catch (error) {
-        return { ok: false, error: error?.message || String(error) };
+        return {
+          ok: false,
+          error: error?.name === 'AbortError' ? 'browser_fetch_timeout' : (error?.message || String(error)),
+        };
+      } finally {
+        clearTimeout(timer);
       }
     }, { url: playUrl.toString(), payload });
 
