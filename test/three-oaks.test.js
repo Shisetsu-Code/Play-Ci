@@ -6,6 +6,7 @@ import {
   buildThreeOaksValidationPlan,
   classifyThreeOaksPlay,
   threeOaksNeedsReview,
+  threeOaksValidationSignature,
 } from '../src/providers/three-oaks.js';
 
 test('extracts and summarizes 3Oaks start response', () => {
@@ -117,4 +118,27 @@ test('classifies browser-native play request and correlated response', () => {
   assert.equal(plays.length, 1);
   assert.equal(plays[0].accepted, true);
   assert.equal(plays[0].request.action.name, 'buy_spin');
+});
+
+
+test('validation signature groups equivalent client/protocol shapes', () => {
+  const a = {
+    client_family: 'kendoo',
+    protocol: {
+      actions: ['buy_spin', 'spin'],
+      available_buy_bonus: [1, 2, 3],
+      available_booster: [],
+      unhandled_actions: [],
+    },
+  };
+  const b = {
+    client_family: 'kendoo',
+    protocol: {
+      actions: ['spin', 'buy_spin'],
+      available_buy_bonus: [10, 20, 30],
+      available_booster: [],
+      unhandled_actions: [],
+    },
+  };
+  assert.equal(threeOaksValidationSignature(a), threeOaksValidationSignature(b));
 });
