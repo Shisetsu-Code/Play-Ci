@@ -228,3 +228,31 @@ Output:
 artifacts/analysis/analysis-report.json
 artifacts/analysis/analysis-report.md
 ```
+
+
+## Windows GUI for target analysis
+
+A small Tkinter launcher is included for Windows. It lets you choose any local `targets.txt` and launch the GitHub Actions analysis without manually running Git commands.
+
+Double-click:
+
+```text
+run-analysis-gui.bat
+```
+
+Or from PowerShell:
+
+```powershell
+py -3 tools\analysis_gui.py
+```
+
+The GUI:
+
+1. validates the selected file;
+2. copies it to `analysis/targets.txt`;
+3. increments `analysis/trigger.txt`;
+4. creates a commit containing only those two analysis files;
+5. pushes the current branch to `origin`;
+6. opens the `Analyze targets` workflow in GitHub Actions.
+
+It does not require GitHub CLI or a manually configured API token. It uses the repository's existing Git authentication.
