@@ -39,6 +39,7 @@ export async function inspectThreeOaksRuntime(page) {
     const ta = window.TestActions;
     const board = window.app?.board;
     const boosterHooks = [];
+    const popupBoosterReady = usable(board?.bonusShopPopup?.activateShopOption);
 
     for (const name of boosterNames) {
       let fn;
@@ -67,7 +68,8 @@ export async function inspectThreeOaksRuntime(page) {
       },
       booster: {
         hooks: boosterHooks,
-        ready: boosterHooks.length > 0,
+        popup: popupBoosterReady ? 'app.board.bonusShopPopup.activateShopOption' : null,
+        ready: popupBoosterReady || boosterHooks.length > 0,
       },
       start: {
         testActionsClose: usable(ta?.closeStartScreen),
@@ -229,16 +231,26 @@ export async function invokeThreeOaksTask(page, task) {
       };
 
       const ta = window.TestActions;
+      const popup = window.app?.board?.bonusShopPopup;
       let selectedHook = null;
 
-      for (const name of boosterNames) {
-        const fn = ta?.[name];
-        if (!usable(fn)) continue;
+      if (usable(popup?.activateShopOption)) {
         try {
-          fn.call(ta, mode);
-          selectedHook = name;
-          break;
+          popup.activateShopOption(mode);
+          selectedHook = 'app.board.bonusShopPopup.activateShopOption';
         } catch {}
+      }
+
+      if (!selectedHook) {
+        for (const name of boosterNames) {
+          const fn = ta?.[name];
+          if (!usable(fn)) continue;
+          try {
+            fn.call(ta, mode);
+            selectedHook = `TestActions.${name}`;
+            break;
+          } catch {}
+        }
       }
 
       if (!selectedHook) {
@@ -250,7 +262,7 @@ export async function invokeThreeOaksTask(page, task) {
           ta.spin();
           return {
             invoked: true,
-            hook: `TestActions.${selectedHook}`,
+            hook: selectedHook,
             spinHook: 'TestActions.spin',
             argument: mode,
           };
@@ -260,7 +272,7 @@ export async function invokeThreeOaksTask(page, task) {
           window.app.board.spin();
           return {
             invoked: true,
-            hook: `TestActions.${selectedHook}`,
+            hook: selectedHook,
             spinHook: 'app.board.spin',
             argument: mode,
           };
