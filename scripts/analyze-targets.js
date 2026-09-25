@@ -201,35 +201,46 @@ function sourceIsEmptyStub(source) {
 }
 
 async function waitForNativeClient(internal) {
-  const network = await internal.recorder.waitForQuiet({
-    quietMs: 1200,
-    timeoutMs: VALIDATION_READY_TIMEOUT_MS,
-  });
+  const started = Date.now();
+  let lastShape = null;
 
-  if (!network.quiet) {
-    return {
-      ready: false,
-      reason: 'network_never_quiet',
-      network,
-    };
-  }
+  while (Date.now() - started < VALIDATION_READY_TIMEOUT_MS) {
+    const state = await internal.page.evaluate(() => {
+      const board = window.app?.board;
+      const testActions = window.TestActions;
+      return {
+        document_ready: document.readyState,
+        has_app: Boolean(window.app),
+        has_board: Boolean(board),
+        has_buy_feature: typeof board?.buyFeature?.actBuyFeature === 'function',
+        has_board_spin: typeof board?.spin === 'function',
+        has_test_actions: Boolean(testActions),
+        has_test_spin: typeof testActions?.spin === 'function',
+        has_gr_ui: Boolean(window.GR?.UI),
+      };
+    }).catch(() => null);
 
-  await sleep(600);
+    lastShape = state;
+    if (state?.has_board || state?.has_test_actions || state?.has_gr_ui) {
+      const shape = await testActionsShape(internal.page).catch(() => ({ kind: 'missing', methods: [] }));
+      return {
+        ready: true,
+        reason: 'client_objects_ready',
+        waited_ms: Date.now() - started,
+        state,
+        shape,
+      };
+    }
 
-  const shape = await testActionsShape(internal.page);
-  if (shape.kind === 'missing') {
-    return {
-      ready: false,
-      reason: 'test_actions_missing',
-      network,
-      shape,
-    };
+    await sleep(150);
   }
 
   return {
-    ready: true,
-    network,
-    shape,
+    ready: false,
+    reason: 'client_objects_timeout',
+    waited_ms: Date.now() - started,
+    state: lastShape,
+    shape: { kind: 'missing', methods: [] },
   };
 }
 
@@ -274,32 +285,57 @@ async function dismissThreeOaksStart(page, shape) {
 }
 
 async function invokeBuy(page, shape, task) {
-  if (shape.kind === 'instance') {
-    const supported = shape.methods.includes('playBuyFeature');
-    if (!supported) return { invoked: false, reason: 'buy_hook_missing' };
-
-    await page.evaluate(() => {
-      if (typeof window.TestActions?.openBuyFeaturePopup === 'function') {
-        window.TestActions.openBuyFeaturePopup();
+  return page.evaluate(({ mode, modeIndex }) => {
+    try {
+      const direct = window.app?.board?.buyFeature?.actBuyFeature;
+      if (typeof direct === 'function') {
+        direct.call(window.app.board.buyFeature, mode);
+        return {
+          invoked: true,
+          hook: 'app.board.buyFeature.actBuyFeature',
+          argument: mode,
+        };
       }
-    });
-    await sleep(700);
-
-    await page.evaluate((index) => window.TestActions.playBuyFeature(index), task.modeIndex);
-    return { invoked: true, hook: 'TestActions.playBuyFeature', modeIndex: task.modeIndex };
-  }
-
-  if (shape.kind === 'static') {
-    const source = shape.sources?.playBuyFeature;
-    if (!shape.methods.includes('playBuyFeature') || sourceIsEmptyStub(source)) {
-      return { invoked: false, reason: 'static_buy_hook_stub' };
+    } catch (error) {
+      return {
+        invoked: false,
+        reason: 'direct_buy_hook_failed',
+        error: error.message,
+        argument: mode,
+      };
     }
 
-    await page.evaluate((index) => window.TestActions.playBuyFeature(index), task.modeIndex);
-    return { invoked: true, hook: 'TestActions.playBuyFeature(static)', modeIndex: task.modeIndex };
-  }
+    const ta = window.TestActions;
+    if (!ta) return { invoked: false, reason: 'buy_hook_unavailable' };
 
-  return { invoked: false, reason: 'buy_hook_unavailable' };
+    try {
+      if (typeof ta.playBuyFeature === 'function') {
+        ta.playBuyFeature(mode);
+        return {
+          invoked: true,
+          hook: 'TestActions.playBuyFeature',
+          argument: mode,
+        };
+      }
+    } catch (error) {
+      try {
+        ta.playBuyFeature(modeIndex);
+        return {
+          invoked: true,
+          hook: 'TestActions.playBuyFeature(index-fallback)',
+          argument: modeIndex,
+        };
+      } catch (fallbackError) {
+        return {
+          invoked: false,
+          reason: 'buy_hook_failed',
+          error: `${error.message}; fallback: ${fallbackError.message}`,
+        };
+      }
+    }
+
+    return { invoked: false, reason: 'buy_hook_unavailable' };
+  }, { mode: task.mode, modeIndex: task.modeIndex });
 }
 
 async function invokeBooster(page, shape, task) {
@@ -429,19 +465,6 @@ async function validateNativeTask(service, discovery, task) {
 
     let plays = classifyThreeOaksPlay(internal.recorder.eventsAfter(0), marker);
 
-    if (plays.length === 0 && task.kind === 'buy' && readiness.shape.kind === 'instance') {
-      try {
-        await internal.page.evaluate((index) => window.TestActions.playBuyFeature(index), task.modeIndex);
-        await internal.recorder.waitForActivityAfter(marker, {
-          timeoutMs: VALIDATION_ACTIVITY_TIMEOUT_MS,
-        });
-        await internal.recorder.waitForQuiet({
-          quietMs: 800,
-          timeoutMs: Math.max(5000, VALIDATION_ACTIVITY_TIMEOUT_MS + 4000),
-        });
-        plays = classifyThreeOaksPlay(internal.recorder.eventsAfter(0), marker);
-      } catch {}
-    }
 
     if (plays.length === 0) {
       return {
