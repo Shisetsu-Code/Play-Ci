@@ -16,7 +16,15 @@ concurrency:
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      ANALYSIS_DISCOVERY_CONCURRENCY: '4'
+      ANALYSIS_VALIDATION_CONCURRENCY: '2'
+      ANALYSIS_VALIDATION_BATCH_SIZE: '5'
+      ANALYSIS_VALIDATION_BATCH_DELAY_MS: '2500'
+      ANALYSIS_MAX_PROVIDER_BLOCK_STREAK: '2'
+      ANALYSIS_VALIDATE_ALL_MODES: '0'
+      ANALYSIS_VALIDATE_BASE_SPIN: '0'
     steps:
       - uses: actions/checkout@v4
 
