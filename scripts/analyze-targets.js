@@ -294,43 +294,95 @@ async function dismissThreeOaksStart(page, shape) {
   return 'viewport_click';
 }
 
-async function invokeBuy(page, shape, task) {
-  return page.evaluate(async ({ mode, modeIndex }) => {
+
+async function waitForGameplayControls(page, timeoutMs = 6000) {
+  const started = Date.now();
+  let last = null;
+
+  while (Date.now() - started < timeoutMs) {
+    last = await page.evaluate(() => {
+      const model = window.GR?.UI?.model;
+      let controlsAvailable = null;
+      let preloaderHidden = null;
+      let actions = null;
+      try { controlsAvailable = model?.get?.('controls.available') ?? null; } catch {}
+      try { preloaderHidden = model?.get?.('preloader_hidden') ?? null; } catch {}
+      try { actions = model?.get?.('actions') ?? null; } catch {}
+
+      return {
+        controls_available: controlsAvailable,
+        preloader_hidden: preloaderHidden,
+        actions,
+        has_board: Boolean(window.app?.board),
+        has_gr_events: Boolean(window.GR?.UI?.Events),
+      };
+    }).catch(() => null);
+
+    if (
+      last?.has_board &&
+      (
+        last.controls_available === true ||
+        (last.controls_available == null && last.preloader_hidden !== false)
+      )
+    ) {
+      return { ready: true, waited_ms: Date.now() - started, state: last };
+    }
+
+    await sleep(150);
+  }
+
+  return { ready: false, waited_ms: Date.now() - started, state: last };
+}
+
+async function invokeBuy(page, shape, task, clientFamily) {
+  return page.evaluate(async ({ mode, modeIndex, clientFamily }) => {
     const ta = window.TestActions;
 
     try {
-      if (typeof ta?.openBuyFeaturePopup === 'function') {
-        const source = Function.prototype.toString.call(ta.openBuyFeaturePopup).replace(/\s+/g, '');
-        if (!/\{\}$/.test(source)) {
-          ta.openBuyFeaturePopup();
-          await new Promise((resolve) => setTimeout(resolve, 450));
+      if (clientFamily === 'ratpack') {
+        const open = ta?.openBuyFeaturePopup;
+        if (typeof open === 'function') {
+          const source = Function.prototype.toString.call(open).replace(/\s+/g, '');
+          if (!/\{\}$/.test(source)) {
+            open.call(ta);
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+        }
+      } else if (clientFamily === 'kendoo') {
+        const clickAccessor = window.GR?.UI?.view?.buy_feature?.click;
+        if (typeof clickAccessor === 'function') {
+          const handler = clickAccessor();
+          if (typeof handler === 'function') {
+            handler();
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
         }
       }
     } catch {}
 
-    try {
-      const direct = window.app?.board?.buyFeature?.actBuyFeature;
-      if (typeof direct === 'function') {
-        if (mode == null) direct.call(window.app.board.buyFeature);
-        else direct.call(window.app.board.buyFeature, mode);
+    const candidates = [
+      ['app.board.buyFeature.actBuyFeature', window.app?.board?.buyFeature],
+      ['app.board.buyBonus.actBuyFeature', window.app?.board?.buyBonus],
+      ['app.buyBonus.actBuyFeature', window.app?.buyBonus],
+    ];
+
+    for (const [name, owner] of candidates) {
+      const direct = owner?.actBuyFeature;
+      if (typeof direct !== 'function') continue;
+      try {
+        if (mode == null) direct.call(owner);
+        else direct.call(owner, mode);
         return {
           invoked: true,
-          hook: 'app.board.buyFeature.actBuyFeature',
+          hook: name,
           argument: mode,
           fixed: mode == null,
-          prepared_popup: true,
+          client_family: clientFamily,
         };
-      }
-    } catch (error) {
-      return {
-        invoked: false,
-        reason: 'direct_buy_hook_failed',
-        error: error.message,
-        argument: mode,
-      };
+      } catch {}
     }
 
-    if (!ta) return { invoked: false, reason: 'buy_hook_unavailable' };
+    if (!ta) return { invoked: false, reason: 'buy_hook_unavailable', client_family: clientFamily };
 
     try {
       if (typeof ta.playBuyFeature === 'function') {
@@ -341,29 +393,38 @@ async function invokeBuy(page, shape, task) {
           hook: 'TestActions.playBuyFeature',
           argument: mode,
           fixed: mode == null,
-          prepared_popup: true,
+          client_family: clientFamily,
         };
       }
     } catch (error) {
-      try {
-        ta.playBuyFeature(modeIndex);
-        return {
-          invoked: true,
-          hook: 'TestActions.playBuyFeature(index-fallback)',
-          argument: modeIndex,
-          prepared_popup: true,
-        };
-      } catch (fallbackError) {
-        return {
-          invoked: false,
-          reason: 'buy_hook_failed',
-          error: `${error.message}; fallback: ${fallbackError.message}`,
-        };
+      if (modeIndex != null) {
+        try {
+          ta.playBuyFeature(modeIndex);
+          return {
+            invoked: true,
+            hook: 'TestActions.playBuyFeature(index-fallback)',
+            argument: modeIndex,
+            client_family: clientFamily,
+          };
+        } catch (fallbackError) {
+          return {
+            invoked: false,
+            reason: 'buy_hook_failed',
+            error: `${error.message}; fallback: ${fallbackError.message}`,
+            client_family: clientFamily,
+          };
+        }
       }
+      return {
+        invoked: false,
+        reason: 'buy_hook_failed',
+        error: error.message,
+        client_family: clientFamily,
+      };
     }
 
-    return { invoked: false, reason: 'buy_hook_unavailable' };
-  }, { mode: task.mode, modeIndex: task.modeIndex });
+    return { invoked: false, reason: 'buy_hook_unavailable', client_family: clientFamily };
+  }, { mode: task.mode, modeIndex: task.modeIndex, clientFamily });
 }
 
 async function invokeBooster(page, shape, task) {
@@ -443,6 +504,33 @@ async function invokeBooster(page, shape, task) {
   }, { mode: task.mode, modeIndex: task.modeIndex });
 }
 
+
+function validationMatchesTask(play, task) {
+  if (!play?.accepted) return false;
+  const action = play.request?.action;
+  const params = action?.params || {};
+
+  if (task.kind === 'buy') {
+    if (action?.name !== 'buy_spin') return false;
+    if (task.mode == null) return params.selected_mode == null;
+    return String(params.selected_mode) === String(task.mode);
+  }
+
+  if (task.kind === 'booster') {
+    if (action?.name !== 'spin') return false;
+    return (
+      String(params.selected_mode) === String(task.mode) &&
+      Number(params.ante_bet) === Number(task.declaredMultiplier)
+    );
+  }
+
+  if (task.kind === 'spin') {
+    return action?.name === 'spin' && params.ante_bet == null;
+  }
+
+  return false;
+}
+
 async function validateNativeTask(service, discovery, task) {
   const started = Date.now();
   const session = await service.createSession({
@@ -471,11 +559,12 @@ async function validateNativeTask(service, discovery, task) {
     }
 
     const startDismissal = await dismissThreeOaksStart(internal.page, readiness.shape);
+    const gameplay = await waitForGameplayControls(internal.page);
     const marker = internal.recorder.marker();
 
     let invocation;
     if (task.kind === 'buy') {
-      invocation = await invokeBuy(internal.page, readiness.shape, task);
+      invocation = await invokeBuy(internal.page, readiness.shape, task, discovery.client_family);
     } else if (task.kind === 'booster') {
       invocation = await invokeBooster(internal.page, readiness.shape, task);
     } else if (task.kind === 'spin') {
@@ -514,6 +603,7 @@ async function validateNativeTask(service, discovery, task) {
         status: 'DECLARED_NATIVE_HOOK_UNAVAILABLE',
         duration_ms: Date.now() - started,
         start_dismissal: startDismissal,
+        gameplay,
         invocation,
       };
     }
@@ -547,9 +637,10 @@ async function validateNativeTask(service, discovery, task) {
 
     const play = plays.at(-1);
     const providerBlocked = [403, 429].includes(play.http_status);
+    const semanticMatch = validationMatchesTask(play, task);
 
     return {
-      ok: play.accepted,
+      ok: semanticMatch,
       url: discovery.url,
       provider: '3oaks',
       client_family: discovery.client_family,
@@ -558,13 +649,17 @@ async function validateNativeTask(service, discovery, task) {
       declared_multiplier: task.declaredMultiplier ?? 1,
       status: providerBlocked
         ? 'DEFERRED_PROVIDER_BLOCK'
-        : play.accepted
+        : semanticMatch
           ? 'VALIDATED_NATIVE'
-          : 'NATIVE_REJECTED',
+          : play.accepted
+            ? 'NATIVE_MODE_MISMATCH'
+            : 'NATIVE_REJECTED',
       duration_ms: Date.now() - started,
       start_dismissal: startDismissal,
+      gameplay,
       invocation,
       request: play.request,
+      semantic_match: semanticMatch,
       response: {
         http_status: play.http_status,
         server_status: play.response?.status ?? null,
