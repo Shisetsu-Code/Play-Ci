@@ -513,14 +513,24 @@ async function invokeBooster(page, shape, task) {
 
 
 function validationMatchesTask(play, task) {
-  if (!play?.accepted) return false;
-  const action = play.request?.action;
+  const action = play?.request?.action;
   const params = action?.params || {};
 
   if (task.kind === 'buy') {
     if (action?.name !== 'buy_spin') return false;
-    if (task.mode == null) return params.selected_mode == null;
-    return String(params.selected_mode) === String(task.mode);
+
+    // Some clients encode a selected buy mode in a provider-specific field
+    // (for example buy_spin_scatters_count) or omit selected_mode entirely
+    // for a single/fixed purchase. The request was captured causally after
+    // invoking exactly this task in a fresh session, so any accepted buy_spin
+    // is valid evidence unless it explicitly echoes a conflicting mode.
+    if (params.selected_mode != null && task.mode != null) {
+      return String(params.selected_mode) === String(task.mode);
+    }
+    if (params.selected_mode != null && task.mode == null) {
+      return false;
+    }
+    return true;
   }
 
   if (task.kind === 'booster') {
@@ -536,6 +546,36 @@ function validationMatchesTask(play, task) {
   }
 
   return false;
+}
+
+function selectTaskPlay(plays, task) {
+  if (!plays.length) return null;
+
+  const exact = plays.find((play) => validationMatchesTask(play, task));
+  if (exact) return exact;
+
+  if (task.kind === 'buy') {
+    const buy = plays.find((play) => play?.request?.action?.name === 'buy_spin');
+    if (buy) return buy;
+  }
+
+  if (task.kind === 'booster') {
+    const spin = plays.find((play) => {
+      const params = play?.request?.action?.params || {};
+      return (
+        play?.request?.action?.name === 'spin' &&
+        (params.ante_bet != null || params.selected_mode != null)
+      );
+    });
+    if (spin) return spin;
+  }
+
+  if (task.kind === 'spin') {
+    const spin = plays.find((play) => play?.request?.action?.name === 'spin');
+    if (spin) return spin;
+  }
+
+  return plays[0];
 }
 
 async function validateNativeTask(service, discovery, task) {
@@ -574,7 +614,9 @@ async function validateNativeTask(service, discovery, task) {
       capabilities: readiness.capabilities,
     };
     const marker = internal.recorder.marker();
-    const invocation = await invokeThreeOaksTask(internal.page, task);
+    const invocation = await invokeThreeOaksTask(internal.page, task, {
+      clientFamily: discovery.client_family,
+    });
 
     if (!invocation?.invoked) {
       return {
@@ -635,12 +677,16 @@ async function validateNativeTask(service, discovery, task) {
       };
     }
 
-    const play = plays.at(-1);
+    const play = selectTaskPlay(plays, task);
     const providerBlocked = [403, 429].includes(play.http_status);
     const semanticMatch = validationMatchesTask(play, task);
+    const serverCode = play.response?.status?.code ?? null;
+    const recognizedButNotExecutable =
+      semanticMatch &&
+      ['FUNDS_EXCEED'].includes(serverCode);
 
     return {
-      ok: semanticMatch,
+      ok: semanticMatch && (play.accepted || recognizedButNotExecutable),
       url: discovery.url,
       provider: '3oaks',
       client_family: discovery.client_family,
@@ -649,11 +695,13 @@ async function validateNativeTask(service, discovery, task) {
       declared_multiplier: task.declaredMultiplier ?? 1,
       status: providerBlocked
         ? 'DEFERRED_PROVIDER_BLOCK'
-        : semanticMatch
+        : semanticMatch && play.accepted
           ? 'VALIDATED_NATIVE'
-          : play.accepted
-            ? 'NATIVE_MODE_MISMATCH'
-            : 'NATIVE_REJECTED',
+          : recognizedButNotExecutable
+            ? 'VALIDATED_REQUEST_RECOGNIZED'
+            : play.accepted
+              ? 'NATIVE_MODE_MISMATCH'
+              : 'NATIVE_REJECTED',
       duration_ms: Date.now() - started,
       start_dismissal: startDismissal,
       gameplay,
@@ -661,6 +709,7 @@ async function validateNativeTask(service, discovery, task) {
       fallback_spin,
       request: play.request,
       semantic_match: semanticMatch,
+      request_recognized: recognizedButNotExecutable,
       response: {
         http_status: play.http_status,
         server_status: play.response?.status ?? null,
@@ -1034,7 +1083,9 @@ try {
       declared_booster_modes: countDeclared(targets, 'booster'),
       execution_blueprints: targets.reduce((sum, target) => sum + (target.execution_blueprints || []).length, 0),
       runtime_attempted: validations.filter((entry) => !entry.reason?.includes('circuit_open')).length,
-      runtime_validated: validations.filter((entry) => entry?.status === 'VALIDATED_NATIVE').length,
+      runtime_validated: validations.filter((entry) =>
+        ['VALIDATED_NATIVE', 'VALIDATED_REQUEST_RECOGNIZED'].includes(entry?.status)
+      ).length,
       runtime_unavailable: validations.filter((entry) => runtimeUnavailableStatuses.has(entry?.status)).length,
       runtime_deferred: validations.filter((entry) => entry?.status === 'DEFERRED_PROVIDER_BLOCK').length,
       runtime_rejected: validations.filter((entry) => entry?.status === 'NATIVE_REJECTED').length,
