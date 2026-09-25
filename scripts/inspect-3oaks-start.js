@@ -11,48 +11,35 @@ try {
     captureInitialScreenshot: false,
   });
   const internal = service.sessions.get(session.id);
-
   await internal.page.mouse.click(640, 670);
-  await sleep(2500);
+  await sleep(2000);
 
-  const capabilities = await internal.page.evaluate(() => ({
-    testActions: Object.keys(window.TestActions || {}),
-    app: Boolean(window.app),
-    board: Boolean(window.app?.board),
-    buyFeature: Boolean(window.app?.board?.buyFeature),
-  }));
-  console.log('CAPABILITIES', JSON.stringify(capabilities));
-
-  const marker = internal.recorder.marker();
-  const invoked = await internal.page.evaluate(() => {
-    if (typeof window.TestActions?.playBuyFeature === 'function') {
-      window.TestActions.playBuyFeature(1);
-      return 'TestActions.playBuyFeature';
+  const inspect = await internal.page.evaluate(() => {
+    const ta = window.TestActions;
+    const chain = [];
+    let obj = ta;
+    for (let depth = 0; obj && depth < 5; depth += 1, obj = Object.getPrototypeOf(obj)) {
+      chain.push({
+        depth,
+        names: Object.getOwnPropertyNames(obj),
+      });
     }
-    if (typeof window.app?.board?.buyFeature?.actBuyFeature === 'function') {
-      window.app.board.buyFeature.actBuyFeature(1);
-      return 'app.board.buyFeature.actBuyFeature';
+    const names = ['playBuyFeature','activateShopOption','spin','playSpin','actSpin','play'];
+    const funcs = {};
+    for (const name of names) {
+      const fn = ta?.[name] || window.app?.board?.[name] || window.app?.board?.buyFeature?.[name];
+      if (typeof fn === 'function') {
+        funcs[name] = Function.prototype.toString.call(fn).slice(0, 4000);
+      }
     }
-    return null;
+    return {
+      chain,
+      funcs,
+      appBoardKeys: Object.keys(window.app?.board || {}),
+      appBoardProto: window.app?.board ? Object.getOwnPropertyNames(Object.getPrototypeOf(window.app.board)) : [],
+    };
   });
-  console.log('INVOKED', invoked);
-
-  await internal.recorder.waitForActivityAfter(marker, { timeoutMs: 2500 });
-  await internal.recorder.waitForQuiet({ quietMs: 700, timeoutMs: 10000 });
-
-  const events = internal.recorder.eventsAfter(marker);
-  const reqs = events.filter((e) => e.type === 'request' && (e.url || '').includes('gsc=play'));
-  for (const req of reqs) {
-    const res = events.find((e) => e.type === 'response' && e.requestId === req.requestId);
-    const body = events.find((e) => e.type === 'responsebody' && e.requestId === req.requestId);
-    console.log('NATIVE_PLAY', JSON.stringify({
-      method: req.method,
-      url: req.url,
-      postData: req.postData,
-      http: res?.status,
-      responseBody: body?.body?.slice?.(0, 2000) || null,
-    }, null, 2));
-  }
+  console.log('INSPECT', JSON.stringify(inspect, null, 2));
 
   await service.closeSession(session.id);
 } finally {
