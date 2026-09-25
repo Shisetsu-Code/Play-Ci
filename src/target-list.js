@@ -1,4 +1,4 @@
-export function parseTargetList(text, { maxTargets = 100 } = {}) {
+export function parseTargetList(text, { maxTargets = 1000 } = {}) {
   const urls = [];
   const seen = new Set();
 
