@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { threeOaksEffectiveBets } from '../src/providers/three-oaks.js';
 
 const inputRoot = path.resolve(process.argv[2] || 'merged-input');
 const outputDir = path.resolve(process.argv[3] || 'artifacts/exhaustive-final');
@@ -51,6 +52,9 @@ const validations = [...validationMap.values()].sort((a, b) => keyForValidation(
 const catalog = targets.map((target) => {
   const protocol = target.protocol || {};
   const features = target.declared_features || [];
+  const effective = target.provider === '3oaks'
+    ? threeOaksEffectiveBets(protocol)
+    : { display_bets: [], by_factor: [] };
   const featureValidation = features.map((feature) => {
     const validation = validationMap.get(featureKey(target.url, feature)) || null;
     return {
@@ -84,8 +88,8 @@ const catalog = targets.map((target) => {
     bet_factor: protocol.bet_factor ?? null,
     lines: protocol.lines || [],
     denominator: protocol.denominator ?? null,
-    display_bets: target.effective_bets?.display_bets || [],
-    bets_by_factor: target.effective_bets?.by_factor || [],
+    display_bets: effective.display_bets || [],
+    bets_by_factor: effective.by_factor || [],
     buy_mode_encoding: protocol.buy_mode_encoding ?? null,
     fixed_buy_multiplier: protocol.fixed_buy_multiplier ?? null,
     buy_modes: featureValidation.filter((f) => f.kind === 'buy'),
