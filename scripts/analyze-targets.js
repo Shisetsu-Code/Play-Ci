@@ -18,6 +18,7 @@ import {
   waitForThreeOaksCapability,
   dismissThreeOaksStart as dismissThreeOaksRuntimeStart,
   invokeThreeOaksTask,
+  triggerThreeOaksSpinControl,
 } from '../src/providers/three-oaks-runtime.js';
 
 const TARGET_FILE = path.resolve(process.env.TARGET_FILE || 'analysis/targets.txt');
@@ -600,7 +601,21 @@ async function validateNativeTask(service, discovery, task) {
     });
 
     let plays = classifyThreeOaksPlay(internal.recorder.eventsAfter(0), marker);
+    let fallback_spin = null;
 
+    if (plays.length === 0 && task.kind === 'booster') {
+      fallback_spin = await triggerThreeOaksSpinControl(internal.page, config.viewport);
+
+      await internal.recorder.waitForActivityAfter(marker, {
+        timeoutMs: VALIDATION_ACTIVITY_TIMEOUT_MS,
+      });
+      await internal.recorder.waitForQuiet({
+        quietMs: 600,
+        timeoutMs: Math.max(5000, VALIDATION_ACTIVITY_TIMEOUT_MS + 3000),
+      });
+
+      plays = classifyThreeOaksPlay(internal.recorder.eventsAfter(0), marker);
+    }
 
     if (plays.length === 0) {
       return {
@@ -615,6 +630,7 @@ async function validateNativeTask(service, discovery, task) {
         duration_ms: Date.now() - started,
         start_dismissal: startDismissal,
         invocation,
+        fallback_spin,
       };
     }
 
@@ -641,6 +657,7 @@ async function validateNativeTask(service, discovery, task) {
       start_dismissal: startDismissal,
       gameplay,
       invocation,
+      fallback_spin,
       request: play.request,
       semantic_match: semanticMatch,
       response: {
