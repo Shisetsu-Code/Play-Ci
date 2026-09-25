@@ -34,6 +34,7 @@ const MAX_PROVIDER_BLOCK_STREAK = envInt('ANALYSIS_MAX_PROVIDER_BLOCK_STREAK', 2
 const RUNTIME_VALIDATION = envBool('ANALYSIS_RUNTIME_VALIDATION', false);
 const VALIDATE_ALL_MODES = envBool('ANALYSIS_VALIDATE_ALL_MODES', false);
 const VALIDATE_BASE_SPIN = envBool('ANALYSIS_VALIDATE_BASE_SPIN', false);
+const VALIDATE_EVERY_TARGET = envBool('ANALYSIS_VALIDATE_EVERY_TARGET', false);
 
 function envInt(name, fallback, min, max) {
   const parsed = Number.parseInt(process.env[name] || '', 10);
@@ -690,7 +691,10 @@ function validationGroups(discoveries) {
     });
     if (tasks.length === 0) continue;
 
-    const signature = threeOaksValidationSignature(discovery);
+    const baseSignature = threeOaksValidationSignature(discovery);
+    const signature = VALIDATE_EVERY_TARGET
+      ? `${baseSignature}|url=${discovery.url}`
+      : baseSignature;
     const existing = groups.get(signature);
     if (existing) {
       existing.covers_urls.push(discovery.url);
@@ -1006,11 +1010,14 @@ try {
       validation_batch_delay_ms: VALIDATION_BATCH_DELAY_MS,
       validate_all_modes: VALIDATE_ALL_MODES,
       validate_base_spin: VALIDATE_BASE_SPIN,
+      validate_every_target: VALIDATE_EVERY_TARGET,
       max_provider_block_streak: MAX_PROVIDER_BLOCK_STREAK,
       runtime_validation_enabled: RUNTIME_VALIDATION,
       runtime_validation_role: 'supplemental only; server start declarations are authoritative discovery evidence',
       runtime_validation_scope: RUNTIME_VALIDATION
-        ? 'one representative game per client/protocol signature by default'
+        ? (VALIDATE_EVERY_TARGET
+            ? 'every target independently'
+            : 'one representative game per client/protocol signature by default')
         : 'disabled by default to avoid UI-hook false negatives and provider rate pressure',
     },
     validation_circuit: {
