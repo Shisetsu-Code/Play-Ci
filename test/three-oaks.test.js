@@ -219,3 +219,37 @@ test('computes complete effective bet catalog across factors and line modes', ()
   ]);
   assert.deepEqual(result.display_bets, [0.1, 0.2, 0.3, 0.6]);
 });
+
+
+test('fixed-price buy_spin is complete without selected_mode', () => {
+  const protocol = {
+    actions: ['spin', 'buy_spin'],
+    unhandled_actions: [],
+    available_buy_bonus: [],
+    available_booster: [],
+    buy_bonus_prices: {},
+    booster_prices: {},
+    fixed_buy_multiplier: 100,
+    initial_bet_per_line: 5,
+    initial_lines: 20,
+  };
+
+  assert.equal(threeOaksNeedsReview(protocol), false);
+
+  const plan = buildThreeOaksValidationPlan({ protocol });
+  assert.deepEqual(plan, [
+    {
+      kind: 'buy',
+      mode: null,
+      modeIndex: null,
+      fixed: true,
+      declaredMultiplier: 100,
+    },
+  ]);
+
+  const blueprint = buildThreeOaksExecutionBlueprints(protocol)
+    .find((entry) => entry.id === 'buy:fixed');
+  assert.ok(blueprint);
+  assert.equal(blueprint.declared_multiplier, 100);
+  assert.equal('selected_mode' in blueprint.request_template.action.params, false);
+});
