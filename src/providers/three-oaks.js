@@ -64,10 +64,60 @@ export function summarizeThreeOaksStart(start) {
     booster_prices: settings.booster_prices || {},
     bets: settings.bets || [],
     bet_factor: settings.bet_factor ?? null,
+    lines: settings.lines || [],
     denominator,
     initial_bet_per_line: context.spins?.bet_per_line ?? null,
     initial_lines: context.spins?.lines ?? null,
     display_bet: betFactor && denominator ? (betPerLine * betFactor) / denominator : null,
+  };
+}
+
+
+function roundBetValue(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 1e8) / 1e8;
+}
+
+export function threeOaksEffectiveBets(protocol) {
+  const rawBets = Array.isArray(protocol?.bets) ? protocol.bets.map(Number).filter(Number.isFinite) : [];
+  const rawFactors = Array.isArray(protocol?.bet_factor)
+    ? protocol.bet_factor
+    : protocol?.bet_factor == null
+      ? []
+      : [protocol.bet_factor];
+  const factors = rawFactors.map(Number).filter((value) => Number.isFinite(value) && value > 0);
+  const denominator = Number(protocol?.denominator || 1);
+  const lines = Array.isArray(protocol?.lines) ? protocol.lines : [];
+
+  if (!rawBets.length || !factors.length || !Number.isFinite(denominator) || denominator <= 0) {
+    return {
+      raw_bets: rawBets,
+      factors,
+      lines,
+      denominator,
+      display_bets: [],
+      by_factor: [],
+    };
+  }
+
+  const byFactor = factors.map((factor, index) => ({
+    factor,
+    lines: lines[index] ?? null,
+    display_bets: [...new Set(
+      rawBets.map((bet) => roundBetValue((bet * factor) / denominator))
+    )].sort((a, b) => a - b),
+  }));
+
+  const displayBets = [...new Set(
+    byFactor.flatMap((entry) => entry.display_bets)
+  )].sort((a, b) => a - b);
+
+  return {
+    raw_bets: rawBets,
+    factors,
+    lines,
+    denominator,
+    display_bets: displayBets,
+    by_factor: byFactor,
   };
 }
 
