@@ -51,7 +51,10 @@ export function summarizeThreeOaksStart(start) {
   const betFactor = firstFinite(settings.bet_factor);
   const betPerLine = Number(context.spins?.bet_per_line ?? context.last_args?.bet_per_line ?? 0);
   const actions = Array.isArray(context.actions) ? context.actions : [];
-  const declaredBuys = Array.isArray(context.available_buy_bonus) ? context.available_buy_bonus : [];
+  const rawDeclaredBuys = Array.isArray(context.available_buy_bonus) ? context.available_buy_bonus : [];
+  const buyActionDeclared = actions.includes('buy_spin');
+  const declaredBuys = buyActionDeclared ? rawDeclaredBuys : [];
+  const orphanedBuyModes = buyActionDeclared ? [] : rawDeclaredBuys;
   const legacyBuyPrices = Array.isArray(settings.buy_bonus_price)
     ? settings.buy_bonus_price.map(Number).filter(Number.isFinite)
     : [];
@@ -73,6 +76,8 @@ export function summarizeThreeOaksStart(start) {
     auxiliary_actions: actions.filter((action) => AUXILIARY_ACTIONS.has(action)),
     unhandled_actions: actions.filter((action) => !RECOGNIZED_ACTIONS.has(action)),
     available_buy_bonus: buys,
+    raw_available_buy_bonus: rawDeclaredBuys,
+    orphaned_buy_bonus: orphanedBuyModes,
     available_booster: boosters,
     buy_bonus_prices: normalizedBuyPrices,
     buy_mode_encoding: declaredBuys.length
@@ -258,8 +263,12 @@ export function threeOaksReviewReasons(protocol) {
     reasons.push({ code: 'BUY_ACTION_WITHOUT_DECLARED_MODES' });
   }
 
-  if (buys.length > 0 && !actions.includes('buy_spin')) {
-    reasons.push({ code: 'BUY_MODES_WITHOUT_BUY_ACTION' });
+  if ((protocol?.orphaned_buy_bonus || []).length > 0) {
+    reasons.push({
+      code: 'ORPHANED_BUY_METADATA',
+      modes: protocol.orphaned_buy_bonus,
+      blocking: false,
+    });
   }
 
   for (const mode of buys) {
@@ -280,7 +289,7 @@ export function threeOaksReviewReasons(protocol) {
 
 export function threeOaksNeedsReview(protocol) {
   return threeOaksReviewReasons(protocol).some((reason) =>
-    ['UNHANDLED_ACTION', 'BUY_ACTION_WITHOUT_DECLARED_MODES', 'BUY_MODES_WITHOUT_BUY_ACTION', 'BOOSTER_ANTE_BET_UNDECLARED']
+    ['UNHANDLED_ACTION', 'BUY_ACTION_WITHOUT_DECLARED_MODES', 'BOOSTER_ANTE_BET_UNDECLARED']
       .includes(reason.code)
   );
 }
