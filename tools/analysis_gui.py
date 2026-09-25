@@ -285,11 +285,12 @@ class AnalysisGui(tk.Tk):
             commit = run_git(
                 self.root_dir,
                 "commit",
-                "--only",
-                TARGET_REL.as_posix(),
-                TRIGGER_REL.as_posix(),
                 "-m",
                 message,
+                "--only",
+                "--",
+                TARGET_REL.as_posix(),
+                TRIGGER_REL.as_posix(),
             )
             if commit.stdout.strip():
                 self.after(0, self._append_log, commit.stdout.strip())
