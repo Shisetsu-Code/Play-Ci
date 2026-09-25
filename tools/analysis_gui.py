@@ -37,7 +37,7 @@ def run_git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedP
     return process
 
 
-def validate_targets(text: str, max_targets: int = 100) -> list[str]:
+def validate_targets(text: str, max_targets: int = 1000) -> list[str]:
     urls: list[str] = []
     seen: set[str] = set()
 
