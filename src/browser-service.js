@@ -94,6 +94,20 @@ export class BrowserService {
       ignoreHTTPSErrors: false,
       serviceWorkers: 'allow',
     });
+
+    // Preserve browser-native networking primitives before any game/provider script
+    // can monkeypatch them. Diagnostic code can use these to reproduce an observed
+    // request through the real Chromium network stack without depending on provider
+    // UI hooks or patched window.fetch implementations.
+    await context.addInitScript(() => {
+      Object.defineProperty(window, '__playCiNativeFetch', {
+        value: window.fetch.bind(window),
+        configurable: false,
+        enumerable: false,
+        writable: false,
+      });
+    });
+
     const page = await context.newPage();
     page.setDefaultNavigationTimeout(this.options.navigationTimeoutMs);
     page.setDefaultTimeout(Math.min(10000, this.options.navigationTimeoutMs));
