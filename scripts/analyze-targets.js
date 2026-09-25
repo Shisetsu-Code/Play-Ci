@@ -285,7 +285,19 @@ async function dismissThreeOaksStart(page, shape) {
 }
 
 async function invokeBuy(page, shape, task) {
-  return page.evaluate(({ mode, modeIndex }) => {
+  return page.evaluate(async ({ mode, modeIndex }) => {
+    const ta = window.TestActions;
+
+    try {
+      if (typeof ta?.openBuyFeaturePopup === 'function') {
+        const source = Function.prototype.toString.call(ta.openBuyFeaturePopup).replace(/\s+/g, '');
+        if (!/\{\}$/.test(source)) {
+          ta.openBuyFeaturePopup();
+          await new Promise((resolve) => setTimeout(resolve, 450));
+        }
+      }
+    } catch {}
+
     try {
       const direct = window.app?.board?.buyFeature?.actBuyFeature;
       if (typeof direct === 'function') {
@@ -294,6 +306,7 @@ async function invokeBuy(page, shape, task) {
           invoked: true,
           hook: 'app.board.buyFeature.actBuyFeature',
           argument: mode,
+          prepared_popup: true,
         };
       }
     } catch (error) {
@@ -305,7 +318,6 @@ async function invokeBuy(page, shape, task) {
       };
     }
 
-    const ta = window.TestActions;
     if (!ta) return { invoked: false, reason: 'buy_hook_unavailable' };
 
     try {
@@ -315,6 +327,7 @@ async function invokeBuy(page, shape, task) {
           invoked: true,
           hook: 'TestActions.playBuyFeature',
           argument: mode,
+          prepared_popup: true,
         };
       }
     } catch (error) {
@@ -324,6 +337,7 @@ async function invokeBuy(page, shape, task) {
           invoked: true,
           hook: 'TestActions.playBuyFeature(index-fallback)',
           argument: modeIndex,
+          prepared_popup: true,
         };
       } catch (fallbackError) {
         return {
