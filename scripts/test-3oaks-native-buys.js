@@ -62,7 +62,13 @@ async function one(target){
     const dismissal=await dismiss(internal.page);
     const marker=internal.recorder.marker();
 
-    const invocation=await internal.page.evaluate((m)=>{
+    const invocation=await internal.page.evaluate(async (m)=>{
+      try{
+        if(typeof window.TestActions?.openBuyFeaturePopup==='function'){
+          window.TestActions.openBuyFeaturePopup();
+          await new Promise(r=>setTimeout(r,450));
+        }
+      }catch{}
       const fn=window.app?.board?.buyFeature?.actBuyFeature;
       if(typeof fn!=='function') return {ok:false,error:'missing'};
       try { fn.call(window.app.board.buyFeature,m); return {ok:true}; }
