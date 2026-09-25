@@ -55,9 +55,10 @@ test('extracts and summarizes 3Oaks start response', () => {
   const summary = summarizeThreeOaksStart(start);
   assert.deepEqual(summary.available_buy_bonus, [1, 2]);
   assert.deepEqual(summary.available_booster, [1, 2, 3]);
-  assert.deepEqual(summary.unhandled_actions, ['set_params']);
+  assert.deepEqual(summary.unhandled_actions, []);
+  assert.deepEqual(summary.auxiliary_actions, ['set_params']);
   assert.equal(summary.display_bet, 1);
-  assert.equal(threeOaksNeedsReview(summary), true);
+  assert.equal(threeOaksNeedsReview(summary), false);
 });
 
 test('validation plan defaults to one representative special mode per kind', () => {
@@ -289,4 +290,39 @@ test('normalizes legacy buy_bonus_price arrays into zero-based buy modes', () =>
     [0, 50],
     [1, 100],
   ]);
+});
+
+
+test('ignores orphaned buy metadata when buy_spin is not an available action', () => {
+  const start = {
+    body: {
+      command: 'start',
+      session_id: 'fairy',
+      context: {
+        actions: ['spin'],
+        available_buy_bonus: [1, 2],
+        spins: { bet_per_line: 5, lines: 25 },
+      },
+      settings: {
+        bets: [1, 2, 3],
+        bet_factor: [20],
+        lines: [25],
+        currency_format: { denominator: 100 },
+      },
+    },
+    request: null,
+  };
+
+  const summary = summarizeThreeOaksStart(start);
+  assert.deepEqual(summary.available_buy_bonus, []);
+  assert.deepEqual(summary.raw_available_buy_bonus, [1, 2]);
+  assert.deepEqual(summary.orphaned_buy_bonus, [1, 2]);
+  assert.equal(threeOaksNeedsReview(summary), false);
+  assert.ok(
+    threeOaksReviewReasons(summary).some((reason) => reason.code === 'ORPHANED_BUY_METADATA')
+  );
+  assert.equal(
+    buildThreeOaksExecutionBlueprints(summary).some((entry) => entry.kind === 'buy'),
+    false,
+  );
 });
