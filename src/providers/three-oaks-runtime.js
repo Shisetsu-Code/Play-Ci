@@ -49,10 +49,17 @@ export async function inspectThreeOaksRuntime(page) {
     return {
       documentReadyState: document.readyState,
       buy: {
-        ready: usable(board?.buyFeature?.actBuyFeature),
+        ready:
+          usable(board?.buyFeature?.actBuyFeature) ||
+          usable(board?.buyBonus?.actBuyFeature) ||
+          usable(window.app?.buyBonus?.actBuyFeature),
         path: usable(board?.buyFeature?.actBuyFeature)
           ? 'app.board.buyFeature.actBuyFeature'
-          : null,
+          : usable(board?.buyBonus?.actBuyFeature)
+            ? 'app.board.buyBonus.actBuyFeature'
+            : usable(window.app?.buyBonus?.actBuyFeature)
+              ? 'app.buyBonus.actBuyFeature'
+              : null,
       },
       spin: {
         testActions: usable(ta?.spin),
@@ -151,26 +158,61 @@ export async function dismissThreeOaksStart(page, viewport) {
 
 export async function invokeThreeOaksTask(page, task) {
   if (task.kind === 'buy') {
-    return page.evaluate((mode) => {
-      const fn = window.app?.board?.buyFeature?.actBuyFeature;
-      if (typeof fn !== 'function') {
-        return { invoked: false, reason: 'buy_method_missing' };
-      }
+    return page.evaluate(async (mode) => {
+      const usable = (fn) => {
+        if (typeof fn !== 'function') return false;
+        try {
+          const source = Function.prototype.toString.call(fn).replace(/\s+/g, '');
+          return Boolean(source) && !/\{\}$/.test(source);
+        } catch {
+          return false;
+        }
+      };
+
+      const ta = window.TestActions;
+      let preparedBy = null;
 
       try {
-        fn.call(window.app.board.buyFeature, mode);
-        return {
-          invoked: true,
-          hook: 'app.board.buyFeature.actBuyFeature',
-          argument: mode,
-        };
-      } catch (error) {
-        return {
-          invoked: false,
-          reason: 'buy_method_failed',
-          error: error?.message || String(error),
-        };
+        if (usable(ta?.openBuyFeaturePopup)) {
+          ta.openBuyFeaturePopup();
+          preparedBy = 'TestActions.openBuyFeaturePopup';
+          await new Promise((resolve) => setTimeout(resolve, 350));
+        } else if (usable(window.app?.board?.buyFeaturePopup?.show)) {
+          window.app.board.buyFeaturePopup.show();
+          preparedBy = 'app.board.buyFeaturePopup.show';
+          await new Promise((resolve) => setTimeout(resolve, 350));
+        }
+      } catch {}
+
+      const candidates = [
+        ['app.board.buyFeature.actBuyFeature', window.app?.board?.buyFeature],
+        ['app.board.buyBonus.actBuyFeature', window.app?.board?.buyBonus],
+        ['app.buyBonus.actBuyFeature', window.app?.buyBonus],
+      ];
+
+      for (const [name, owner] of candidates) {
+        const fn = owner?.actBuyFeature;
+        if (typeof fn !== 'function') continue;
+
+        try {
+          if (mode == null) fn.call(owner);
+          else fn.call(owner, mode);
+
+          return {
+            invoked: true,
+            hook: name,
+            argument: mode,
+            preparedBy,
+          };
+        } catch {}
       }
+
+      return {
+        invoked: false,
+        reason: 'buy_method_missing_or_failed',
+        argument: mode,
+        preparedBy,
+      };
     }, task.mode);
   }
 
