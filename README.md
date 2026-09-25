@@ -256,3 +256,6 @@ The GUI:
 6. opens the `Analyze targets` workflow in GitHub Actions.
 
 It does not require GitHub CLI or a manually configured API token. It uses the repository's existing Git authentication.
+
+
+The target list accepts up to **1000 URLs** per run. Execution concurrency remains limited, so a large file is processed in controlled parallel batches rather than opening 1000 Chromium contexts at once.
