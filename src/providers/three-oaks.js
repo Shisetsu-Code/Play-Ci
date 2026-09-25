@@ -150,3 +150,17 @@ export function classifyThreeOaksPlay(events, marker = 0) {
 export function threeOaksNeedsReview(protocol) {
   return Boolean((protocol?.unhandled_actions || []).length);
 }
+
+
+export function threeOaksValidationSignature(discovery) {
+  const protocol = discovery?.protocol || {};
+  const actions = [...(protocol.actions || [])].sort();
+  const unhandled = [...(protocol.unhandled_actions || [])].sort();
+  return [
+    discovery?.client_family || 'unknown',
+    `actions=${actions.join(',')}`,
+    `buy=${(protocol.available_buy_bonus || []).length}`,
+    `booster=${(protocol.available_booster || []).length}`,
+    `unhandled=${unhandled.join(',')}`,
+  ].join('|');
+}
