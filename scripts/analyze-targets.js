@@ -98,6 +98,22 @@ function detectThreeOaksClientFamily(events) {
 function declaredFeatures(protocol) {
   const rows = [];
 
+  if (
+    (protocol?.available_buy_bonus || []).length === 0 &&
+    (protocol?.actions || []).includes('buy_spin') &&
+    Number.isFinite(Number(protocol?.fixed_buy_multiplier))
+  ) {
+    rows.push({
+      kind: 'buy',
+      action: 'buy_spin',
+      mode: null,
+      fixed: true,
+      multiplier: Number(protocol.fixed_buy_multiplier),
+      evidence: 'server_start',
+      status: 'DECLARED',
+    });
+  }
+
   for (const mode of protocol?.available_buy_bonus || []) {
     rows.push({
       kind: 'buy',
@@ -302,11 +318,13 @@ async function invokeBuy(page, shape, task) {
     try {
       const direct = window.app?.board?.buyFeature?.actBuyFeature;
       if (typeof direct === 'function') {
-        direct.call(window.app.board.buyFeature, mode);
+        if (mode == null) direct.call(window.app.board.buyFeature);
+        else direct.call(window.app.board.buyFeature, mode);
         return {
           invoked: true,
           hook: 'app.board.buyFeature.actBuyFeature',
           argument: mode,
+          fixed: mode == null,
           prepared_popup: true,
         };
       }
@@ -323,11 +341,13 @@ async function invokeBuy(page, shape, task) {
 
     try {
       if (typeof ta.playBuyFeature === 'function') {
-        ta.playBuyFeature(mode);
+        if (mode == null) ta.playBuyFeature();
+        else ta.playBuyFeature(mode);
         return {
           invoked: true,
           hook: 'TestActions.playBuyFeature',
           argument: mode,
+          fixed: mode == null,
           prepared_popup: true,
         };
       }
@@ -717,12 +737,28 @@ function buildBetCatalog(targets) {
       denominator: effective.denominator,
       display_bets: effective.display_bets,
       bets_by_factor: effective.by_factor,
-      buy_modes: (protocol.available_buy_bonus || []).map((mode) => ({
-        mode,
-        multiplier: protocol.buy_bonus_prices?.[String(mode)] ?? null,
-        action: 'buy_spin',
-        evidence: 'server_start',
-      })),
+      buy_modes: [
+        ...(
+          (protocol.available_buy_bonus || []).length === 0 &&
+          (protocol.actions || []).includes('buy_spin') &&
+          Number.isFinite(Number(protocol.fixed_buy_multiplier))
+            ? [{
+                mode: null,
+                fixed: true,
+                multiplier: Number(protocol.fixed_buy_multiplier),
+                action: 'buy_spin',
+                evidence: 'server_start',
+              }]
+            : []
+        ),
+        ...(protocol.available_buy_bonus || []).map((mode) => ({
+          mode,
+          fixed: false,
+          multiplier: protocol.buy_bonus_prices?.[String(mode)] ?? null,
+          action: 'buy_spin',
+          evidence: 'server_start',
+        })),
+      ],
       boosters: (protocol.available_booster || []).map((mode) => ({
         mode,
         multiplier: protocol.booster_prices?.[String(mode)] ?? null,
