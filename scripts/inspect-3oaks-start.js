@@ -1,7 +1,7 @@
-import crypto from 'node:crypto';
 import { config } from '../src/config.js';
 import { BrowserService } from '../src/browser-service.js';
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const service = new BrowserService(config);
 await service.start();
 try {
@@ -11,90 +11,46 @@ try {
     captureInitialScreenshot: false,
   });
   const internal = service.sessions.get(session.id);
-  const events = internal.recorder.eventsAfter(0);
-  const bodyEvent = events.find((e) => e.type === 'responsebody' && (() => {
-    try { return JSON.parse(e.body)?.command === 'start'; } catch { return false; }
-  })());
-  const req = bodyEvent && events.find((e) => e.type === 'request' && e.requestId === bodyEvent.requestId);
-  const original = JSON.parse(req.postData);
 
-  async function startFresh(label, freshIds) {
-    const payload = {
-      ...original,
-      request_id: crypto.randomUUID().replaceAll('-', ''),
-      client_command_timestamp: Date.now(),
-    };
-    if (freshIds) {
-      payload.session_id = crypto.randomUUID().replaceAll('-', '');
-      payload.huid = 'demo-' + crypto.randomUUID().replaceAll('-', '');
+  await internal.page.mouse.click(640, 670);
+  await sleep(2500);
+
+  const capabilities = await internal.page.evaluate(() => ({
+    testActions: Object.keys(window.TestActions || {}),
+    app: Boolean(window.app),
+    board: Boolean(window.app?.board),
+    buyFeature: Boolean(window.app?.board?.buyFeature),
+  }));
+  console.log('CAPABILITIES', JSON.stringify(capabilities));
+
+  const marker = internal.recorder.marker();
+  const invoked = await internal.page.evaluate(() => {
+    if (typeof window.TestActions?.playBuyFeature === 'function') {
+      window.TestActions.playBuyFeature(1);
+      return 'TestActions.playBuyFeature';
     }
-    const response = await internal.context.request.post(req.url, {
-      headers: { 'content-type': 'text/plain', referer: 'https://3oaks.com/' },
-      data: JSON.stringify(payload),
-      failOnStatusCode: false,
-    });
-    const text = await response.text();
-    let body = null;
-    try { body = JSON.parse(text); } catch {}
-    console.log(label, JSON.stringify({
-      http: response.status(),
-      request_session_id: payload.session_id,
-      request_huid: payload.huid,
-      status: body?.status,
-      response_session_id: body?.session_id,
-      response_huid: body?.user?.huid,
-      actions: body?.context?.actions,
-      balance: body?.user?.balance,
-      raw: body ? undefined : text.slice(0, 300),
-    }, null, 2));
-    return { payload, body };
-  }
+    if (typeof window.app?.board?.buyFeature?.actBuyFeature === 'function') {
+      window.app.board.buyFeature.actBuyFeature(1);
+      return 'app.board.buyFeature.actBuyFeature';
+    }
+    return null;
+  });
+  console.log('INVOKED', invoked);
 
-  const same = await startFresh('REPLAY_SAME_IDS', false);
-  const fresh = await startFresh('REPLAY_FRESH_IDS', true);
+  await internal.recorder.waitForActivityAfter(marker, { timeoutMs: 2500 });
+  await internal.recorder.waitForQuiet({ quietMs: 700, timeoutMs: 10000 });
 
-  if (fresh.body?.status?.code === 'OK') {
-    const playUrl = new URL(req.url);
-    playUrl.searchParams.set('gsc', 'play');
-    const start = fresh.body;
-    const playPayload = {
-      command: 'play',
-      request_id: crypto.randomUUID().replaceAll('-', ''),
-      session_id: start.session_id,
-      action: {
-        name: 'buy_spin',
-        params: {
-          bet_per_line: start.context.spins.bet_per_line,
-          lines: start.context.spins.lines,
-          selected_mode: 1,
-        },
-      },
-      set_denominator: 1,
-      quick_spin: 1,
-      sound: true,
-      autogame: false,
-      mobile: '0',
-      portrait: false,
-      fullscreen: true,
-      viewportSize: '1280x720',
-      client_command_timestamp: Date.now(),
-    };
-    const response = await internal.context.request.post(playUrl.toString(), {
-      headers: { 'content-type': 'text/plain', referer: 'https://3oaks.com/' },
-      data: JSON.stringify(playPayload),
-      failOnStatusCode: false,
-    });
-    const text = await response.text();
-    let body = null;
-    try { body = JSON.parse(text); } catch {}
-    console.log('FRESH_PLAY', JSON.stringify({
-      http: response.status(),
-      status: body?.status,
-      last_action: body?.context?.last_action,
-      last_args: body?.context?.last_args,
-      next_actions: body?.context?.actions,
-      balance: body?.user?.balance,
-      raw: body ? undefined : text.slice(0, 300),
+  const events = internal.recorder.eventsAfter(marker);
+  const reqs = events.filter((e) => e.type === 'request' && (e.url || '').includes('gsc=play'));
+  for (const req of reqs) {
+    const res = events.find((e) => e.type === 'response' && e.requestId === req.requestId);
+    const body = events.find((e) => e.type === 'responsebody' && e.requestId === req.requestId);
+    console.log('NATIVE_PLAY', JSON.stringify({
+      method: req.method,
+      url: req.url,
+      postData: req.postData,
+      http: res?.status,
+      responseBody: body?.body?.slice?.(0, 2000) || null,
     }, null, 2));
   }
 
