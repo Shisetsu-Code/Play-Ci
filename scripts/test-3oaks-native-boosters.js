@@ -25,11 +25,25 @@ async function waitReady(page,timeout=15000){
 }
 
 async function dismiss(page){
-  await page.evaluate(()=>{
-    try{if(typeof window.TestActions?.closeStartScreen==='function'){window.TestActions.closeStartScreen();return;}}catch{}
-    try{window.app?.startScreen?.skip?.();}catch{}
-  }).catch(()=>{});
+  const method=await page.evaluate(()=>{
+    try{
+      const fn=window.TestActions?.closeStartScreen;
+      if(typeof fn==='function'){
+        const src=Function.prototype.toString.call(fn).replace(/\s+/g,'');
+        if(!/\{\}$/.test(src)){fn.call(window.TestActions);return 'TestActions.closeStartScreen';}
+      }
+    }catch{}
+    try{
+      if(typeof window.app?.startScreen?.skip==='function'){
+        window.app.startScreen.skip();
+        return 'app.startScreen.skip';
+      }
+    }catch{}
+    return null;
+  }).catch(()=>null);
+  if(!method) await page.mouse.click(config.viewport.width/2,config.viewport.height-50);
   await sleep(1400);
+  return method||'viewport_click';
 }
 
 async function describeSpin(page){
