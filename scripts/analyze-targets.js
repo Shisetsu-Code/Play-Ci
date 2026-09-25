@@ -9,6 +9,8 @@ import {
   buildThreeOaksValidationPlan,
   classifyThreeOaksPlay,
   threeOaksNeedsReview,
+  threeOaksReviewReasons,
+  buildThreeOaksExecutionBlueprints,
   threeOaksValidationSignature,
 } from '../src/providers/three-oaks.js';
 
@@ -22,6 +24,7 @@ const VALIDATION_BATCH_DELAY_MS = envInt('ANALYSIS_VALIDATION_BATCH_DELAY_MS', 2
 const VALIDATION_READY_TIMEOUT_MS = envInt('ANALYSIS_VALIDATION_READY_TIMEOUT_MS', 30000, 5000, 90000);
 const VALIDATION_ACTIVITY_TIMEOUT_MS = envInt('ANALYSIS_VALIDATION_ACTIVITY_TIMEOUT_MS', 5000, 1000, 20000);
 const MAX_PROVIDER_BLOCK_STREAK = envInt('ANALYSIS_MAX_PROVIDER_BLOCK_STREAK', 2, 1, 10);
+const RUNTIME_VALIDATION = envBool('ANALYSIS_RUNTIME_VALIDATION', false);
 const VALIDATE_ALL_MODES = envBool('ANALYSIS_VALIDATE_ALL_MODES', false);
 const VALIDATE_BASE_SPIN = envBool('ANALYSIS_VALIDATE_BASE_SPIN', false);
 
@@ -135,6 +138,7 @@ async function discover(service, url) {
 
     if (start) {
       const protocol = summarizeThreeOaksStart(start);
+      const reviewReasons = threeOaksReviewReasons(protocol);
       return {
         ok: true,
         url,
@@ -143,7 +147,9 @@ async function discover(service, url) {
         status: threeOaksNeedsReview(protocol) ? 'REQUIRES_REVIEW' : 'DISCOVERED',
         duration_ms: Date.now() - started,
         protocol,
+        review_reasons: reviewReasons,
         declared_features: declaredFeatures(protocol),
+        execution_blueprints: buildThreeOaksExecutionBlueprints(protocol),
       };
     }
 
@@ -491,6 +497,7 @@ async function validateNativeTask(service, discovery, task) {
 }
 
 function validationGroups(discoveries) {
+  if (!RUNTIME_VALIDATION) return [];
   const groups = new Map();
 
   for (const discovery of discoveries) {
@@ -624,6 +631,8 @@ function markdown(report) {
     `- Requires review: ${report.summary.requires_review}`,
     `- Declared buy modes: ${report.summary.declared_buy_modes}`,
     `- Declared booster modes: ${report.summary.declared_booster_modes}`,
+    `- Execution blueprints: ${report.summary.execution_blueprints}`,
+    `- Runtime validation enabled: ${report.policy.runtime_validation_enabled}`,
     `- Runtime validations attempted: ${report.summary.runtime_attempted}`,
     `- Runtime validated: ${report.summary.runtime_validated}`,
     `- Runtime unavailable/no request: ${report.summary.runtime_unavailable}`,
@@ -648,6 +657,8 @@ function markdown(report) {
       lines.push(`- Buy prices: ${JSON.stringify(target.protocol.buy_bonus_prices || {})}`);
       lines.push(`- Boosters: ${JSON.stringify(target.protocol.available_booster || [])}`);
       lines.push(`- Booster prices: ${JSON.stringify(target.protocol.booster_prices || {})}`);
+      lines.push(`- Review reasons: ${JSON.stringify(target.review_reasons || [])}`);
+      lines.push(`- Execution blueprints: ${(target.execution_blueprints || []).length}`);
     }
 
     const validations = report.validations.filter((entry) => entry.url === target.url);
@@ -705,8 +716,11 @@ try {
       validate_all_modes: VALIDATE_ALL_MODES,
       validate_base_spin: VALIDATE_BASE_SPIN,
       max_provider_block_streak: MAX_PROVIDER_BLOCK_STREAK,
-      runtime_validation_role: 'supplemental; server start declarations remain authoritative discovery evidence',
-      runtime_validation_scope: 'one representative game per client/protocol signature by default',
+      runtime_validation_enabled: RUNTIME_VALIDATION,
+      runtime_validation_role: 'supplemental only; server start declarations are authoritative discovery evidence',
+      runtime_validation_scope: RUNTIME_VALIDATION
+        ? 'one representative game per client/protocol signature by default'
+        : 'disabled by default to avoid UI-hook false negatives and provider rate pressure',
     },
     validation_circuit: {
       open: adaptive.circuit_open,
@@ -720,6 +734,7 @@ try {
       requires_review: targets.filter((entry) => entry?.status === 'REQUIRES_REVIEW').length,
       declared_buy_modes: countDeclared(targets, 'buy'),
       declared_booster_modes: countDeclared(targets, 'booster'),
+      execution_blueprints: targets.reduce((sum, target) => sum + (target.execution_blueprints || []).length, 0),
       runtime_attempted: validations.filter((entry) => !entry.reason?.includes('circuit_open')).length,
       runtime_validated: validations.filter((entry) => entry?.status === 'VALIDATED_NATIVE').length,
       runtime_unavailable: validations.filter((entry) => runtimeUnavailableStatuses.has(entry?.status)).length,
@@ -733,6 +748,31 @@ try {
   await fs.mkdir(OUTPUT_DIR, { recursive: true });
   await fs.writeFile(path.join(OUTPUT_DIR, 'analysis-report.json'), JSON.stringify(report, null, 2), 'utf8');
   await fs.writeFile(path.join(OUTPUT_DIR, 'analysis-report.md'), markdown(report), 'utf8');
+
+  const blueprintCatalog = targets
+    .filter((target) => target.provider === '3oaks')
+    .map((target) => ({
+      url: target.url,
+      client_family: target.client_family,
+      status: target.status,
+      review_reasons: target.review_reasons || [],
+      protocol: target.protocol,
+      execution_blueprints: target.execution_blueprints || [],
+    }));
+  await fs.writeFile(
+    path.join(OUTPUT_DIR, 'protocol-blueprints.json'),
+    JSON.stringify(blueprintCatalog, null, 2),
+    'utf8',
+  );
+
+  const reviewTargets = targets
+    .filter((target) => target.status === 'REQUIRES_REVIEW')
+    .map((target) => target.url);
+  await fs.writeFile(
+    path.join(OUTPUT_DIR, 'review-targets.txt'),
+    reviewTargets.length ? `${reviewTargets.join('\n')}\n` : '',
+    'utf8',
+  );
 
   const retryTargets = [...new Set(
     validations
