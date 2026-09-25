@@ -12,6 +12,7 @@ import {
   threeOaksReviewReasons,
   buildThreeOaksExecutionBlueprints,
   threeOaksValidationSignature,
+  threeOaksEffectiveBets,
 } from '../src/providers/three-oaks.js';
 
 const TARGET_FILE = path.resolve(process.env.TARGET_FILE || 'analysis/targets.txt');
@@ -677,6 +678,96 @@ function countDeclared(targets, kind) {
   );
 }
 
+
+function gameSlug(url) {
+  try {
+    const parsed = new URL(url);
+    const match = parsed.pathname.match(/\/games\/([^/]+)\//);
+    return match?.[1] || parsed.pathname;
+  } catch {
+    return url;
+  }
+}
+
+function buildBetCatalog(targets) {
+  return targets.map((target) => {
+    const protocol = target.protocol || {};
+    const effective = target.provider === '3oaks'
+      ? threeOaksEffectiveBets(protocol)
+      : {
+          raw_bets: [],
+          factors: [],
+          lines: [],
+          denominator: null,
+          display_bets: [],
+          by_factor: [],
+        };
+
+    return {
+      game: gameSlug(target.url),
+      url: target.url,
+      provider: target.provider || 'unknown',
+      client_family: target.client_family || 'unknown',
+      discovery_status: target.status || (target.ok ? 'DISCOVERED' : 'ERROR'),
+      actions: protocol.actions || [],
+      unhandled_actions: protocol.unhandled_actions || [],
+      raw_bets: effective.raw_bets,
+      bet_factors: effective.factors,
+      lines: effective.lines,
+      denominator: effective.denominator,
+      display_bets: effective.display_bets,
+      bets_by_factor: effective.by_factor,
+      buy_modes: (protocol.available_buy_bonus || []).map((mode) => ({
+        mode,
+        multiplier: protocol.buy_bonus_prices?.[String(mode)] ?? null,
+        action: 'buy_spin',
+        evidence: 'server_start',
+      })),
+      boosters: (protocol.available_booster || []).map((mode) => ({
+        mode,
+        multiplier: protocol.booster_prices?.[String(mode)] ?? null,
+        action: 'spin',
+        ante_bet: protocol.booster_prices?.[String(mode)] ?? null,
+        evidence: 'server_start',
+      })),
+      catalog_status:
+        target.provider === '3oaks' && target.ok
+          ? ((protocol.unhandled_actions || []).length ? 'COMPLETE_WITH_REVIEW_ACTION' : 'COMPLETE')
+          : 'REQUIRES_REVIEW',
+    };
+  });
+}
+
+function csvCell(value) {
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  return `"${String(text ?? '').replaceAll('"', '""')}"`;
+}
+
+function catalogCsv(catalog) {
+  const columns = [
+    'game',
+    'url',
+    'provider',
+    'client_family',
+    'catalog_status',
+    'actions',
+    'unhandled_actions',
+    'raw_bets',
+    'bet_factors',
+    'lines',
+    'denominator',
+    'display_bets',
+    'buy_modes',
+    'boosters',
+  ];
+
+  const rows = [columns.map(csvCell).join(',')];
+  for (const game of catalog) {
+    rows.push(columns.map((column) => csvCell(game[column])).join(','));
+  }
+  return `${rows.join('\n')}\n`;
+}
+
 function markdown(report) {
   const lines = [
     '# Play-Ci analysis report',
@@ -700,6 +791,8 @@ function markdown(report) {
     `- Runtime rejected: ${report.summary.runtime_rejected}`,
     `- Validation signatures: ${report.summary.validation_signatures}`,
     `- Targets covered by representative runtime validation: ${report.summary.runtime_covered_targets}`,
+    `- Bet catalogs complete: ${report.summary.catalog_complete}/${report.summary.total_targets}`,
+    `- Catalogs requiring review: ${report.summary.catalog_requires_review}`,
     '',
   ];
 
@@ -764,6 +857,8 @@ try {
     'DECLARED_NATIVE_NO_REQUEST',
   ]);
 
+  const catalog = buildBetCatalog(targets);
+
   const report = {
     generated_at: new Date().toISOString(),
     target_file: path.relative(process.cwd(), TARGET_FILE),
@@ -802,12 +897,25 @@ try {
       runtime_rejected: validations.filter((entry) => entry?.status === 'NATIVE_REJECTED').length,
       validation_signatures: groups.length,
       runtime_covered_targets: new Set(validations.flatMap((entry) => entry?.covers_urls || [])).size,
+      catalog_complete: catalog.filter((entry) => entry.catalog_status === 'COMPLETE').length,
+      catalog_requires_review: catalog.filter((entry) => entry.catalog_status !== 'COMPLETE').length,
     },
   };
 
   await fs.mkdir(OUTPUT_DIR, { recursive: true });
   await fs.writeFile(path.join(OUTPUT_DIR, 'analysis-report.json'), JSON.stringify(report, null, 2), 'utf8');
   await fs.writeFile(path.join(OUTPUT_DIR, 'analysis-report.md'), markdown(report), 'utf8');
+  await fs.writeFile(path.join(OUTPUT_DIR, 'bet-catalog.json'), JSON.stringify(catalog, null, 2), 'utf8');
+  await fs.writeFile(path.join(OUTPUT_DIR, 'bet-catalog.csv'), catalogCsv(catalog), 'utf8');
+
+  const unfinishedTargets = catalog
+    .filter((entry) => entry.catalog_status !== 'COMPLETE')
+    .map((entry) => entry.url);
+  await fs.writeFile(
+    path.join(OUTPUT_DIR, 'unfinished-targets.txt'),
+    unfinishedTargets.length ? `${unfinishedTargets.join('\n')}\n` : '',
+    'utf8',
+  );
 
   const blueprintCatalog = targets
     .filter((target) => target.provider === '3oaks')
