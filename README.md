@@ -214,7 +214,7 @@ The intended ChatGPT workflow is:
 3. ChatGPT reads the current target file, increments `analysis/trigger.txt`, waits for the `Analyze targets` workflow, reads the `play-ci-analysis` artifact and reports the result.
 4. Protocol-first analyzers validate known providers automatically. Unknown protocols are marked `REQUIRES_REVIEW` instead of guessing.
 
-For 3 Oaks, the analyzer extracts the server-declared actions, bets, buy modes, buy prices, boosters and booster prices from `start`, then validates base spin / declared modes in fresh sessions using the same Playwright browser context. No screenshots are taken unless a later review explicitly needs vision.
+For 3 Oaks, the analyzer first extracts server-declared actions, bets, buy modes, buy prices, boosters and booster prices from `start`. That protocol evidence is the completeness map. Runtime proof is visual-first: capture a screenshot, have GPT/debugger identify the real visible control, click the exact viewport coordinate with Playwright, and correlate the resulting `gsc=play` request/response. Internal hooks are diagnostic aids only and are not sufficient proof by themselves.
 
 Local execution:
 
@@ -261,9 +261,9 @@ It does not require GitHub CLI or a manually configured API token. It uses the r
 The target list accepts up to **1000 URLs** per run. Execution concurrency remains limited, so a large file is processed in controlled parallel batches rather than opening 1000 Chromium contexts at once.
 
 
-### Adaptive analysis policy
+### Visual-first validation policy
 
-The analyzer treats protocol discovery and runtime execution as separate evidence layers.
+The authoritative runtime loop is `screenshot → GPT coordinates → Playwright click → captured request/response → new screenshot`. Protocol discovery and runtime execution are separate evidence layers.
 
 - 3 Oaks `start` is the authoritative discovery source for actions, buy modes, boosters, prices and bets.
 - Runtime validation is supplemental and uses the browser's native game client, never a raw replay through Playwright `APIRequestContext`.
@@ -279,3 +279,14 @@ To force exhaustive runtime execution of every declared mode:
 $env:ANALYSIS_VALIDATE_ALL_MODES="1"
 npm run analyze:targets
 ```
+
+
+## Project continuity
+
+For architecture, validation rules, historical pitfalls and a complete handoff for a future ChatGPT conversation, read these files in order:
+
+1. `docs/PROJECT_HANDOFF.md`
+2. `docs/ARCHITECTURE.md`
+3. `docs/VALIDATION_POLICY.md`
+
+These documents are the durable source of truth for the project's objective. If an experimental script or old comment conflicts with them, the documents above take precedence.
