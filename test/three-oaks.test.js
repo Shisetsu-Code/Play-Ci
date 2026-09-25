@@ -6,6 +6,8 @@ import {
   buildThreeOaksValidationPlan,
   classifyThreeOaksPlay,
   threeOaksNeedsReview,
+  threeOaksReviewReasons,
+  buildThreeOaksExecutionBlueprints,
   threeOaksValidationSignature,
 } from '../src/providers/three-oaks.js';
 
@@ -141,4 +143,59 @@ test('validation signature groups equivalent client/protocol shapes', () => {
     },
   };
   assert.equal(threeOaksValidationSignature(a), threeOaksValidationSignature(b));
+});
+
+
+test('builds execution blueprints directly from server declarations', () => {
+  const protocol = {
+    actions: ['spin', 'buy_spin'],
+    unhandled_actions: [],
+    available_buy_bonus: [1, 2],
+    available_booster: [1, 2, 3],
+    buy_bonus_prices: { '1': 75, '2': 200 },
+    booster_prices: { '1': 1.75, '2': 3, '3': 7.5 },
+    initial_bet_per_line: 5,
+    initial_lines: 25,
+  };
+
+  const blueprints = buildThreeOaksExecutionBlueprints(protocol);
+  assert.equal(blueprints.length, 6);
+
+  const buy = blueprints.find((entry) => entry.id === 'buy:1');
+  assert.equal(buy.request_template.action.name, 'buy_spin');
+  assert.equal(buy.request_template.action.params.selected_mode, 1);
+  assert.equal(buy.declared_multiplier, 75);
+
+  const booster = blueprints.find((entry) => entry.id === 'booster:3');
+  assert.equal(booster.request_template.action.name, 'spin');
+  assert.equal(booster.request_template.action.params.selected_mode, 3);
+  assert.equal(booster.request_template.action.params.ante_bet, 7.5);
+});
+
+test('review reasons distinguish structural gaps from price-only gaps', () => {
+  const missingModes = {
+    actions: ['spin', 'buy_spin'],
+    unhandled_actions: [],
+    available_buy_bonus: [],
+    available_booster: [],
+    buy_bonus_prices: {},
+    booster_prices: {},
+  };
+  assert.equal(threeOaksNeedsReview(missingModes), true);
+  assert.ok(
+    threeOaksReviewReasons(missingModes).some((reason) => reason.code === 'BUY_ACTION_WITHOUT_DECLARED_MODES')
+  );
+
+  const missingBuyPrice = {
+    actions: ['spin', 'buy_spin'],
+    unhandled_actions: [],
+    available_buy_bonus: [1],
+    available_booster: [],
+    buy_bonus_prices: {},
+    booster_prices: {},
+  };
+  assert.equal(threeOaksNeedsReview(missingBuyPrice), false);
+  assert.ok(
+    threeOaksReviewReasons(missingBuyPrice).some((reason) => reason.code === 'BUY_MODE_PRICE_UNDECLARED')
+  );
 });
