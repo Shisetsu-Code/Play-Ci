@@ -66,9 +66,14 @@ const catalog = targets.map((target) => {
     };
   });
 
-  const allFeaturesValidated = featureValidation.every((f) =>
-    f.runtime_status === 'VALIDATED_NATIVE' || f.runtime_status === 'NOT_ATTEMPTED'
-  );
+  const runtimeAcceptedStatuses = new Set([
+    'VALIDATED_NATIVE',
+    'VALIDATED_REQUEST_RECOGNIZED',
+  ]);
+  const attemptedFeatures = featureValidation.filter((f) => f.runtime_status !== 'NOT_ATTEMPTED');
+  const allAttemptedValidated =
+    attemptedFeatures.length > 0 &&
+    attemptedFeatures.every((f) => runtimeAcceptedStatuses.has(f.runtime_status));
 
   return {
     game: (() => {
@@ -95,11 +100,17 @@ const catalog = targets.map((target) => {
     buy_modes: featureValidation.filter((f) => f.kind === 'buy'),
     boosters: featureValidation.filter((f) => f.kind === 'booster'),
     catalog_status:
-      target.status === 'DISCOVERED' && allFeaturesValidated
+      target.status === 'DISCOVERED'
         ? 'COMPLETE'
-        : target.status === 'DISCOVERED'
-          ? 'DISCOVERED_RUNTIME_PARTIAL'
-          : 'REQUIRES_REVIEW',
+        : 'REQUIRES_REVIEW',
+    runtime_validation_status:
+      featureValidation.length === 0
+        ? 'NOT_REQUIRED'
+        : attemptedFeatures.length === 0
+          ? 'NOT_ATTEMPTED'
+          : allAttemptedValidated && attemptedFeatures.length === featureValidation.length
+            ? 'COMPLETE'
+            : 'PARTIAL',
   };
 });
 
@@ -117,10 +128,14 @@ const summary = {
   requires_review: targets.filter((t) => t.status === 'REQUIRES_REVIEW').length,
   declared_features: targets.reduce((sum, t) => sum + (t.declared_features || []).length, 0),
   runtime_validations: validations.length,
-  runtime_validated: validations.filter((v) => v.status === 'VALIDATED_NATIVE').length,
+  runtime_validated: validations.filter((v) =>
+    ['VALIDATED_NATIVE', 'VALIDATED_REQUEST_RECOGNIZED'].includes(v.status)
+  ).length,
   runtime_status_counts: statusCounts,
   catalog_complete: catalog.filter((c) => c.catalog_status === 'COMPLETE').length,
-  catalog_partial: catalog.filter((c) => c.catalog_status === 'DISCOVERED_RUNTIME_PARTIAL').length,
+  runtime_complete: catalog.filter((c) => c.runtime_validation_status === 'COMPLETE').length,
+  runtime_partial: catalog.filter((c) => c.runtime_validation_status === 'PARTIAL').length,
+  runtime_not_attempted: catalog.filter((c) => c.runtime_validation_status === 'NOT_ATTEMPTED').length,
   catalog_requires_review: catalog.filter((c) => c.catalog_status === 'REQUIRES_REVIEW').length,
 };
 
@@ -137,7 +152,7 @@ await fs.writeFile(path.join(outputDir, 'exhaustive-report.json'), JSON.stringif
 await fs.writeFile(path.join(outputDir, 'bet-catalog.json'), JSON.stringify(catalog, null, 2), 'utf8');
 
 const columns = [
-  'game','url','provider','client_family','catalog_status','discovery_status',
+  'game','url','provider','client_family','catalog_status','runtime_validation_status','discovery_status',
   'actions','raw_bets','bet_factor','lines','denominator','display_bets',
   'buy_mode_encoding','fixed_buy_multiplier','buy_modes','boosters','review_reasons'
 ];
@@ -159,7 +174,9 @@ const md = [
   `Runtime validations: ${summary.runtime_validations}`,
   `Runtime validated: ${summary.runtime_validated}`,
   `Catalog complete: ${summary.catalog_complete}`,
-  `Catalog partial: ${summary.catalog_partial}`,
+  `Runtime complete: ${summary.runtime_complete}`,
+  `Runtime partial: ${summary.runtime_partial}`,
+  `Runtime not attempted: ${summary.runtime_not_attempted}`,
   `Catalog requires review: ${summary.catalog_requires_review}`,
   '',
   'Runtime statuses:',
