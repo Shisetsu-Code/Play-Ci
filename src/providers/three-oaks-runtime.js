@@ -276,4 +276,85 @@ export async function invokeThreeOaksTask(page, task) {
   return { invoked: false, reason: 'unsupported_task' };
 }
 
+export async function triggerThreeOaksSpinControl(page, viewport) {
+  const direct = await page.evaluate(() => {
+    const spinView = window.GR?.UI?.view?.spin;
+
+    try {
+      const accessor = spinView?.click;
+      if (typeof accessor === 'function') {
+        const handler = accessor.call(spinView);
+        if (typeof handler === 'function') {
+          handler();
+          return {
+            triggered: true,
+            method: 'GR.UI.view.spin.click.handler',
+          };
+        }
+
+        return {
+          triggered: true,
+          method: 'GR.UI.view.spin.click',
+        };
+      }
+    } catch {}
+
+    const candidates = [
+      ['app.board.spinButton.click', window.app?.board?.spinButton, window.app?.board?.spinButton?.click],
+      ['app.board.spinButton.emit', window.app?.board?.spinButton, window.app?.board?.spinButton?.emit],
+      ['app.board.spinBtn.click', window.app?.board?.spinBtn, window.app?.board?.spinBtn?.click],
+      ['app.board.spinBtn.emit', window.app?.board?.spinBtn, window.app?.board?.spinBtn?.emit],
+    ];
+
+    for (const [name, owner, fn] of candidates) {
+      if (typeof fn !== 'function') continue;
+      try {
+        if (name.endsWith('.emit')) fn.call(owner, 'pointertap');
+        else fn.call(owner);
+        return { triggered: true, method: name };
+      } catch {}
+    }
+
+    const x = Number(spinView?.x);
+    const y = Number(spinView?.y);
+    return {
+      triggered: false,
+      method: null,
+      x: Number.isFinite(x) ? x : null,
+      y: Number.isFinite(y) ? y : null,
+    };
+  });
+
+  if (direct.triggered) {
+    return direct;
+  }
+
+  if (
+    Number.isFinite(direct.x) &&
+    Number.isFinite(direct.y) &&
+    direct.x >= 0 &&
+    direct.x < viewport.width &&
+    direct.y >= 0 &&
+    direct.y < viewport.height
+  ) {
+    await page.mouse.click(direct.x, direct.y);
+    return {
+      triggered: true,
+      method: 'GR.UI.view.spin.xy',
+      x: direct.x,
+      y: direct.y,
+    };
+  }
+
+  const x = viewport.width - 85;
+  const y = Math.round(viewport.height / 2);
+  await page.mouse.click(x, y);
+  return {
+    triggered: true,
+    method: 'viewport_spin_fallback',
+    x,
+    y,
+  };
+}
+
 export const THREE_OAKS_RUNTIME_BUY_PATH = BUY_FN;
