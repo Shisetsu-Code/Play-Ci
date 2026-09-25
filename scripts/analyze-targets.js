@@ -353,52 +353,75 @@ async function invokeBuy(page, shape, task) {
 }
 
 async function invokeBooster(page, shape, task) {
-  const result = await page.evaluate(({ mode, modeIndex }) => {
-    const raw = window.TestActions;
-    if (!raw) return { invoked: false, reason: 'test_actions_missing' };
+  return page.evaluate(async ({ mode, modeIndex }) => {
+    const ta = window.TestActions;
+    const popup = window.app?.board?.bonusShopPopup;
 
-    const object = typeof raw === 'object' ? raw : raw;
-    const names = [
-      'activateShopOption',
-      'selectShopOption',
-      'playShopOption',
-      'activateBooster',
-      'selectBooster',
-    ];
+    try {
+      if (typeof ta?.openBonusShopPopup === 'function') {
+        const source = Function.prototype.toString.call(ta.openBonusShopPopup).replace(/\s+/g, '');
+        if (!/\{\}$/.test(source)) {
+          ta.openBonusShopPopup();
+          await new Promise((resolve) => setTimeout(resolve, 350));
+        }
+      } else if (typeof window.GR?.UI?.view?.shop_button?.click === 'function') {
+        const clickHandler = window.GR.UI.view.shop_button.click();
+        if (typeof clickHandler === 'function') {
+          clickHandler();
+          await new Promise((resolve) => setTimeout(resolve, 350));
+        }
+      }
+    } catch {}
 
-    let selected = null;
-    for (const name of names) {
-      if (typeof object[name] !== 'function') continue;
+    try {
+      if (typeof popup?.activateShopOption === 'function') {
+        popup.activateShopOption(mode);
+      } else if (typeof ta?.activateShopOption === 'function') {
+        ta.activateShopOption(mode);
+      } else {
+        return { invoked: false, reason: 'booster_selector_missing' };
+      }
+    } catch (error) {
       try {
-        object[name](mode);
-        selected = name;
-        break;
-      } catch {
-        try {
-          object[name](modeIndex);
-          selected = name;
-          break;
-        } catch {}
+        if (typeof popup?.activateShopOption === 'function') {
+          popup.activateShopOption(modeIndex);
+        } else if (typeof ta?.activateShopOption === 'function') {
+          ta.activateShopOption(modeIndex);
+        }
+      } catch (fallbackError) {
+        return {
+          invoked: false,
+          reason: 'booster_selector_failed',
+          error: `${error.message}; fallback: ${fallbackError.message}`,
+        };
       }
     }
 
-    if (!selected) {
-      return { invoked: false, reason: 'booster_hook_missing' };
-    }
+    await new Promise((resolve) => setTimeout(resolve, 120));
 
-    if (typeof object.spin === 'function') {
-      try {
-        object.spin();
-        return { invoked: true, hook: selected, spinHook: 'spin' };
-      } catch (error) {
-        return { invoked: false, reason: 'spin_hook_failed', hook: selected, error: error.message };
+    try {
+      if (typeof ta?.spin === 'function') {
+        ta.spin();
+        return {
+          invoked: true,
+          hook: 'bonusShopPopup.activateShopOption + TestActions.spin',
+          argument: mode,
+        };
       }
+      if (typeof window.app?.board?.spin === 'function') {
+        window.app.board.spin();
+        return {
+          invoked: true,
+          hook: 'bonusShopPopup.activateShopOption + app.board.spin',
+          argument: mode,
+        };
+      }
+    } catch (error) {
+      return { invoked: false, reason: 'spin_hook_failed', error: error.message };
     }
 
-    return { invoked: false, reason: 'spin_hook_missing', hook: selected };
+    return { invoked: false, reason: 'spin_hook_missing' };
   }, { mode: task.mode, modeIndex: task.modeIndex });
-
-  return result;
 }
 
 async function validateNativeTask(service, discovery, task) {
