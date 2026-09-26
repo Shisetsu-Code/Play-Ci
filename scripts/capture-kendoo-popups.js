@@ -12,43 +12,53 @@ const cases=[
 const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
 const service=new BrowserService(config);
 
-async function dismiss(page){
-  const method=await page.evaluate(()=>{
-    try{
-      const fn=window.TestActions?.closeStartScreen;
-      if(typeof fn==='function'){
-        const s=Function.prototype.toString.call(fn).replace(/\s+/g,'');
-        if(!/\{\}$/.test(s)){fn.call(window.TestActions);return 'TestActions.closeStartScreen';}
-      }
-    }catch{}
-    try{if(typeof window.app?.startScreen?.skip==='function'){window.app.startScreen.skip();return 'app.startScreen.skip';}}catch{}
-    return null;
-  }).catch(()=>null);
-  if(!method) await page.mouse.click(640,360);
-  await sleep(1800);
-  return method||'viewport_click';
+async function state(page){
+  return page.evaluate(()=>({
+    readyState:document.readyState,
+    preloader:(()=>{try{return window.GR?.UI?.model?.get?.('preloader_hidden')??null}catch{return null}})(),
+    controls:(()=>{try{return window.GR?.UI?.model?.get?.('controls.available')??null}catch{return null}})(),
+    buyVisible:(()=>{try{return window.GR?.UI?.view?.buy_feature?.visible?.()??null}catch{return null}})(),
+    buyDisabled:(()=>{try{return window.GR?.UI?.view?.buy_feature?.disabled?.()??null}catch{return null}})(),
+    buySelected:(()=>{try{return window.GR?.UI?.view?.buy_feature?.selected?.()??null}catch{return null}})(),
+    appBuyActive:window.app?.buyFeature?.active??null,
+    appBuyVisible:window.app?.buyFeature?.visible??null,
+    appBuyX:window.app?.buyFeature?.x??null,
+    appBuyY:window.app?.buyFeature?.y??null,
+    viewX:(()=>{try{return window.GR?.UI?.view?.buy_feature?.x?.()??null}catch{return null}})(),
+    viewY:(()=>{try{return window.GR?.UI?.view?.buy_feature?.y?.()??null}catch{return null}})(),
+    board:Boolean(window.app?.board),
+  }));
 }
 
-async function openBuy(page){
-  const state=await page.evaluate(()=>{
-    const v=window.GR?.UI?.view?.buy_feature;
-    const read=(name)=>{try{return typeof v?.[name]==='function'?v[name]():v?.[name]??null}catch{return null}};
-    return {
-      x:Number(read('x')),
-      y:Number(read('y')),
-      visible:read('visible'),
-      disabled:read('disabled'),
-    };
-  });
-  if(Number.isFinite(state.x)&&Number.isFinite(state.y)&&state.x>=0&&state.x<1280&&state.y>=0&&state.y<720){
-    await page.mouse.click(state.x,state.y);
-    await sleep(1200);
-    return {method:'GR.UI.view.buy_feature.xy',...state};
+async function waitUntil(page,predicate,timeout=45000){
+  const start=Date.now(); let last=null;
+  while(Date.now()-start<timeout){
+    last=await state(page).catch(()=>null);
+    if(last&&predicate(last)) return {ok:true,waited:Date.now()-start,state:last};
+    await sleep(200);
   }
-  // Kendoo common lower-left fallback.
-  await page.mouse.click(150,195);
-  await sleep(1200);
-  return {method:'fallback',...state};
+  return {ok:false,waited:Date.now()-start,state:last};
+}
+
+async function scanInteractive(page){
+  return page.evaluate(()=>{
+    const out=[];
+    const roots=[window.app?.stage,window.app?.board,window.app?.buyFeature].filter(Boolean);
+    const seen=new WeakSet();
+    const walk=(obj,depth=0)=>{
+      if(!obj||depth>12||(typeof obj!=='object'&&typeof obj!=='function')||seen.has(obj))return;
+      seen.add(obj);
+      let bounds=null;
+      try{const b=obj.getBounds?.(); if(b)bounds={x:b.x,y:b.y,width:b.width,height:b.height};}catch{}
+      const interactive=Boolean(obj.interactive)||['static','dynamic'].includes(obj.eventMode);
+      if(obj.visible!==false&&interactive&&bounds&&bounds.width>5&&bounds.height>5&&bounds.x<1280&&bounds.y<720&&bounds.x+bounds.width>0&&bounds.y+bounds.height>0){
+        out.push({ctor:obj.constructor?.name||null,name:obj.name||null,label:obj.label||null,eventMode:obj.eventMode||null,interactive:Boolean(obj.interactive),bounds});
+      }
+      for(const child of obj.children||[])walk(child,depth+1);
+    };
+    for(const root of roots)walk(root);
+    return out;
+  });
 }
 
 await service.start();
@@ -61,31 +71,49 @@ try{
     const dir=path.join('artifacts','kendoo-popups',id);
     await fs.mkdir(dir,{recursive:true});
     try{
-      await sleep(5000);
-      const dismissal=await dismiss(internal.page);
-      const base=await service.capture(s.id,'base');
-      await fs.copyFile(path.resolve(base.path),path.join(dir,'base.png'));
-      const open=await openBuy(internal.page);
+      const loaded=await waitUntil(internal.page,s=>s.preloader===true||s.controls===true,45000);
+      const startShot=await service.capture(s.id,'start-ready');
+      await fs.copyFile(path.resolve(startShot.path),path.join(dir,'start-ready.png'));
+
+      // Kendoo start screens are canvas/WebGL and require a real pointer gesture.
+      await internal.page.mouse.click(640,650);
+      await sleep(1000);
+      const entered=await waitUntil(
+        internal.page,
+        s=>s.controls===true || s.appBuyActive===true || (s.buyVisible===true&&s.buyDisabled===false),
+        30000,
+      );
+      const gameShot=await service.capture(s.id,'game-ready');
+      await fs.copyFile(path.resolve(gameShot.path),path.join(dir,'game-ready.png'));
+
+      const before=await state(internal.page);
+      const interactiveBefore=await scanInteractive(internal.page);
+      await fs.writeFile(path.join(dir,'interactive-before.json'),JSON.stringify(interactiveBefore,null,2),'utf8');
+
+      // Prefer the actual visible BUY FEATURE control. If model coordinates are not
+      // usable, click the center of the most plausible interactive rectangle.
+      let open=null;
+      if(Number.isFinite(Number(before.viewX))&&Number.isFinite(Number(before.viewY))&&before.viewX>=0&&before.viewX<1280&&before.viewY>=0&&before.viewY<720){
+        await internal.page.mouse.click(Number(before.viewX),Number(before.viewY));
+        open={method:'view_xy',x:Number(before.viewX),y:Number(before.viewY)};
+      }else{
+        const plausible=interactiveBefore
+          .filter(x=>x.bounds.width>=60&&x.bounds.height>=25&&x.bounds.width<500&&x.bounds.height<250)
+          .sort((a,b)=>a.bounds.x-b.bounds.x)[0];
+        if(plausible){
+          const x=plausible.bounds.x+plausible.bounds.width/2;
+          const y=plausible.bounds.y+plausible.bounds.height/2;
+          await internal.page.mouse.click(x,y);
+          open={method:'interactive',x,y,bounds:plausible.bounds};
+        }
+      }
+      await sleep(1200);
       const popup=await service.capture(s.id,'popup');
       await fs.copyFile(path.resolve(popup.path),path.join(dir,'popup.png'));
-      const tree=await internal.page.evaluate(()=>{
-        const out=[];
-        const root=window.app?.stage||window.app?.board;
-        const walk=(obj,depth=0)=>{
-          if(!obj||depth>8)return;
-          let bounds=null;
-          try{const b=obj.getBounds?.(); if(b)bounds={x:b.x,y:b.y,width:b.width,height:b.height};}catch{}
-          const interactive=Boolean(obj.interactive)||['static','dynamic'].includes(obj.eventMode);
-          if(obj.visible!==false&&interactive&&bounds&&bounds.width>5&&bounds.height>5&&bounds.x<1280&&bounds.y<720&&bounds.x+bounds.width>0&&bounds.y+bounds.height>0){
-            out.push({ctor:obj.constructor?.name||null,name:obj.name||null,label:obj.label||null,eventMode:obj.eventMode||null,interactive:Boolean(obj.interactive),bounds});
-          }
-          for(const child of obj.children||[])walk(child,depth+1);
-        };
-        walk(root);
-        return out;
-      });
-      await fs.writeFile(path.join(dir,'interactive.json'),JSON.stringify(tree,null,2),'utf8');
-      manifest.push({id,game,url,dismissal,open,interactive:tree,ok:true});
+      const interactiveAfter=await scanInteractive(internal.page);
+      await fs.writeFile(path.join(dir,'interactive-after.json'),JSON.stringify(interactiveAfter,null,2),'utf8');
+
+      manifest.push({id,game,url,loaded,entered,before,open,interactiveBefore,interactiveAfter,ok:true});
     }catch(error){manifest.push({id,game,url,ok:false,error:error.message});}
     finally{await service.closeSession(s.id);}
   }
