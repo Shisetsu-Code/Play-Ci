@@ -291,7 +291,7 @@ export function bgamingReviewReasons(protocol) {
   if (!(protocol?.display_bets || []).length) {
     reasons.push({code:'NO_BETS_DECLARED'});
   }
-  if (!['v2','legacy'].includes(protocol?.generation)) {
+  if (!['v2','legacy','jsonrpc'].includes(protocol?.generation)) {
     reasons.push({code:'UNKNOWN_BGAMING_GENERATION'});
   }
   for (const mode of protocol?.special_modes || []) {
