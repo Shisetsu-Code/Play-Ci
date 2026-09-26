@@ -1023,12 +1023,55 @@ function validationGroups(discoveries) {
   return [...groups.values()];
 }
 
+async function validateHybridTask(service, discovery, task) {
+  // Kendoo's internal buy hook can report success without emitting gsc=play;
+  // prefer real visible clicks whenever a mapped layout is available.
+  if (discovery.client_family === 'kendoo') {
+    const visual = await validateVisualTask(service, discovery, task);
+    if (
+      ['VALIDATED_VISUAL', 'VALIDATED_REQUEST_RECOGNIZED', 'DEFERRED_PROVIDER_BLOCK']
+        .includes(visual.status)
+    ) {
+      return visual;
+    }
+    const native = await validateNativeTask(service, discovery, task);
+    return native.ok ? native : {
+      ...visual,
+      fallback_native_status: native.status,
+      fallback_native: native,
+    };
+  }
+
+  // Other families expose native client methods that have already been shown
+  // to emit the same gsc=play requests as visible controls. Use them first to
+  // avoid brittle coordinate dependence, then fall back to visual proof.
+  const native = await validateNativeTask(service, discovery, task);
+  if (
+    ['VALIDATED_NATIVE', 'VALIDATED_REQUEST_RECOGNIZED', 'DEFERRED_PROVIDER_BLOCK']
+      .includes(native.status)
+  ) {
+    return native;
+  }
+
+  const visual = await validateVisualTask(service, discovery, task);
+  return visual.ok ? {
+    ...visual,
+    fallback_from_native_status: native.status,
+  } : {
+    ...native,
+    fallback_visual_status: visual.status,
+    fallback_visual: visual,
+  };
+}
+
 async function validateGroup(service, group) {
   const results = [];
   for (const task of group.tasks) {
     const result = RUNTIME_MODE === 'visual'
       ? await validateVisualTask(service, group.discovery, task)
-      : await validateNativeTask(service, group.discovery, task);
+      : RUNTIME_MODE === 'hybrid'
+        ? await validateHybridTask(service, group.discovery, task)
+        : await validateNativeTask(service, group.discovery, task);
     results.push({
       ...result,
       validation_signature: group.signature,
