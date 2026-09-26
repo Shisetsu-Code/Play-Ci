@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../src/config.js';
@@ -995,6 +996,134 @@ async function validateNativeTask(service, discovery, task) {
   }
 }
 
+
+async function validateProtocolReplayTask(service, discovery, task) {
+  const started = Date.now();
+  const session = await service.createSession({
+    url: discovery.url,
+    skipSplash: false,
+    captureInitialScreenshot: false,
+  });
+
+  try {
+    const internal = service.sessions.get(session.id);
+    const start = extractThreeOaksStart(internal.recorder.eventsAfter(0));
+    if (!start?.body?.session_id || !start?.request?.url) {
+      return {
+        ok: false,
+        url: discovery.url,
+        provider: '3oaks',
+        client_family: discovery.client_family,
+        kind: task.kind,
+        mode: task.mode,
+        declared_multiplier: task.declaredMultiplier ?? 1,
+        status: 'PROTOCOL_REPLAY_START_MISSING',
+        duration_ms: Date.now() - started,
+      };
+    }
+
+    const playUrl = new URL(start.request.url);
+    playUrl.searchParams.set('gsc', 'play');
+
+    const context = start.body.context || {};
+    const settings = start.body.settings || {};
+    const params = {
+      bet_per_line: context.spins?.bet_per_line,
+      lines: context.spins?.lines,
+    };
+
+    const factors = Array.isArray(settings.bet_factor)
+      ? settings.bet_factor
+      : [settings.bet_factor];
+    const firstFactor = factors.map(Number).find(Number.isFinite);
+    if (
+      Number.isFinite(firstFactor) &&
+      ['goreel', 'hraymo', 'enjoy'].includes(discovery.client_family)
+    ) {
+      params.bet_factor = firstFactor;
+    }
+
+    if (task.kind === 'buy' && task.mode != null) {
+      params.selected_mode = task.mode;
+    } else if (task.kind === 'booster') {
+      params.selected_mode = task.mode;
+      params.ante_bet = Number(task.declaredMultiplier);
+    }
+
+    const payload = {
+      command: 'play',
+      request_id: crypto.randomUUID().replaceAll('-', ''),
+      session_id: start.body.session_id,
+      action: {
+        name: task.kind === 'buy' ? 'buy_spin' : 'spin',
+        params,
+      },
+      set_denominator: 1,
+      quick_spin: 1,
+      sound: true,
+      autogame: false,
+      mobile: '0',
+      portrait: false,
+      fullscreen: true,
+      viewportSize: `${config.viewport.width}x${config.viewport.height}`,
+      client_command_timestamp: Date.now(),
+    };
+
+    const response = await internal.context.request.post(playUrl.toString(), {
+      headers: {
+        'content-type': 'text/plain',
+        referer: 'https://3oaks.com/',
+      },
+      data: JSON.stringify(payload),
+      failOnStatusCode: false,
+    });
+
+    const text = await response.text();
+    let body = null;
+    try { body = JSON.parse(text); } catch {}
+
+    const httpStatus = response.status();
+    const serverCode = body?.status?.code ?? null;
+    const providerBlocked = [403, 429].includes(httpStatus);
+    const recognized =
+      httpStatus >= 200 &&
+      httpStatus < 300 &&
+      ['OK', 'FUNDS_EXCEED', 'SERVER_ERROR'].includes(serverCode);
+
+    return {
+      ok: recognized,
+      url: discovery.url,
+      provider: '3oaks',
+      client_family: discovery.client_family,
+      kind: task.kind,
+      mode: task.mode,
+      declared_multiplier: task.declaredMultiplier ?? 1,
+      status: providerBlocked
+        ? 'DEFERRED_PROVIDER_BLOCK'
+        : serverCode === 'OK'
+          ? 'VALIDATED_PROTOCOL_REPLAY'
+          : recognized
+            ? 'VALIDATED_REPLAY_RECOGNIZED'
+            : 'PROTOCOL_REPLAY_REJECTED',
+      duration_ms: Date.now() - started,
+      request: payload,
+      response: {
+        http_status: httpStatus,
+        server_status: body?.status ?? null,
+        command: body?.command ?? null,
+        last_action: body?.context?.last_action ?? null,
+        last_args: body?.context?.last_args ?? null,
+        next_actions: body?.context?.actions ?? null,
+        round_finished: body?.context?.round_finished ?? null,
+        balance: body?.user?.balance ?? null,
+        currency: body?.user?.currency ?? null,
+      },
+    };
+  } finally {
+    await service.closeSession(session.id);
+  }
+}
+
 function validationGroups(discoveries) {
   if (!RUNTIME_VALIDATION) return [];
   const groups = new Map();
@@ -1030,8 +1159,6 @@ function validationGroups(discoveries) {
 }
 
 async function validateHybridTask(service, discovery, task) {
-  // Kendoo's internal buy hook can report success without emitting gsc=play;
-  // prefer real visible clicks whenever a mapped layout is available.
   if (discovery.client_family === 'kendoo') {
     const visual = await validateVisualTask(service, discovery, task);
     if (
@@ -1040,17 +1167,18 @@ async function validateHybridTask(service, discovery, task) {
     ) {
       return visual;
     }
-    const native = await validateNativeTask(service, discovery, task);
-    return native.ok ? native : {
+
+    const replay = await validateProtocolReplayTask(service, discovery, task);
+    return replay.ok ? {
+      ...replay,
+      fallback_from_visual_status: visual.status,
+    } : {
       ...visual,
-      fallback_native_status: native.status,
-      fallback_native: native,
+      fallback_replay_status: replay.status,
+      fallback_replay: replay,
     };
   }
 
-  // Other families expose native client methods that have already been shown
-  // to emit the same gsc=play requests as visible controls. Use them first to
-  // avoid brittle coordinate dependence, then fall back to visual proof.
   const native = await validateNativeTask(service, discovery, task);
   if (
     ['VALIDATED_NATIVE', 'VALIDATED_REQUEST_RECOGNIZED', 'DEFERRED_PROVIDER_BLOCK']
@@ -1060,13 +1188,26 @@ async function validateHybridTask(service, discovery, task) {
   }
 
   const visual = await validateVisualTask(service, discovery, task);
-  return visual.ok ? {
-    ...visual,
+  if (
+    ['VALIDATED_VISUAL', 'VALIDATED_REQUEST_RECOGNIZED', 'DEFERRED_PROVIDER_BLOCK']
+      .includes(visual.status)
+  ) {
+    return {
+      ...visual,
+      fallback_from_native_status: native.status,
+    };
+  }
+
+  const replay = await validateProtocolReplayTask(service, discovery, task);
+  return replay.ok ? {
+    ...replay,
     fallback_from_native_status: native.status,
+    fallback_visual_status: visual.status,
   } : {
     ...native,
     fallback_visual_status: visual.status,
-    fallback_visual: visual,
+    fallback_replay_status: replay.status,
+    fallback_replay: replay,
   };
 }
 
@@ -1401,7 +1542,7 @@ try {
       execution_blueprints: targets.reduce((sum, target) => sum + (target.execution_blueprints || []).length, 0),
       runtime_attempted: validations.filter((entry) => !entry.reason?.includes('circuit_open')).length,
       runtime_validated: validations.filter((entry) =>
-        ['VALIDATED_NATIVE', 'VALIDATED_VISUAL', 'VALIDATED_REQUEST_RECOGNIZED'].includes(entry?.status)
+        ['VALIDATED_NATIVE', 'VALIDATED_VISUAL', 'VALIDATED_REQUEST_RECOGNIZED', 'VALIDATED_PROTOCOL_REPLAY', 'VALIDATED_REPLAY_RECOGNIZED'].includes(entry?.status)
       ).length,
       runtime_unavailable: validations.filter((entry) => runtimeUnavailableStatuses.has(entry?.status)).length,
       runtime_deferred: validations.filter((entry) => entry?.status === 'DEFERRED_PROVIDER_BLOCK').length,
