@@ -1,0 +1,62 @@
+name: Analyze targets
+
+on:
+  push:
+    paths:
+      - 'analysis/trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: play-ci-analysis-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ANALYSIS_DISCOVERY_CONCURRENCY: '4'
+      ANALYSIS_VALIDATION_CONCURRENCY: '2'
+      ANALYSIS_VALIDATION_BATCH_SIZE: '5'
+      ANALYSIS_VALIDATION_BATCH_DELAY_MS: '2500'
+      ANALYSIS_VALIDATION_READY_TIMEOUT_MS: '15000'
+      ANALYSIS_MAX_PROVIDER_BLOCK_STREAK: '2'
+      ANALYSIS_RUNTIME_VALIDATION: '0'
+      ANALYSIS_VALIDATE_ALL_MODES: '0'
+      ANALYSIS_VALIDATE_BASE_SPIN: '0'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: npm install --no-audit --no-fund
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-1.63.0
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: Analyze target list
+        run: npm run analyze:targets
+
+      - name: Publish summary
+        if: always()
+        run: |
+          if [ -f artifacts/analysis/analysis-report.md ]; then
+            cat artifacts/analysis/analysis-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: play-ci-analysis
+          path: artifacts/analysis/
+          if-no-files-found: warn
+          retention-days: 30
