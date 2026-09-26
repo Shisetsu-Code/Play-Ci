@@ -659,7 +659,17 @@ async function validateVisualTask(service, discovery, task) {
       ? coordinateForBooster(profile, task.modeIndex ?? 0)
       : profile.spin;
 
-  if (!option || !profile.dismiss || (task.kind !== 'spin' && !profile.open_economic)) {
+  const requiresBuyOpen = task.kind === 'buy';
+  const hasBoosterPath = task.kind !== 'booster' ||
+    profile.open_booster === false ||
+    Boolean(profile.open_booster || profile.open_economic);
+
+  if (
+    !option ||
+    !profile.dismiss ||
+    (requiresBuyOpen && !profile.open_economic) ||
+    !hasBoosterPath
+  ) {
     return {
       ok: false,
       url: discovery.url,
@@ -687,8 +697,23 @@ async function validateVisualTask(service, discovery, task) {
     if (Number(waits.initial_ms) > 0) await sleep(Number(waits.initial_ms));
     await clickProfileSequence(internal.page, profile.dismiss, Number(waits.after_dismiss_ms || 0));
 
-    if (task.kind !== 'spin') {
-      await clickProfileSequence(internal.page, profile.open_economic, Number(waits.after_open_ms || 0));
+    if (task.kind === 'buy') {
+      await clickProfileSequence(
+        internal.page,
+        profile.open_economic,
+        Number(waits.after_open_ms || 0),
+      );
+    } else if (task.kind === 'booster') {
+      const boosterOpen = profile.open_booster === false
+        ? null
+        : (profile.open_booster || profile.open_economic);
+      if (boosterOpen) {
+        await clickProfileSequence(
+          internal.page,
+          boosterOpen,
+          Number(waits.after_booster_open_ms ?? waits.after_open_ms ?? 0),
+        );
+      }
     }
 
     const evidenceScreenshot = task.kind !== 'spin'
