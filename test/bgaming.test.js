@@ -141,3 +141,49 @@ test('summarizes BGaming JSONRPC bet limits', () => {
   assert.equal(p.default_bet_display,1);
   assert.equal(bgamingNeedsReview(p),false);
 });
+
+
+test('BGaming v2 feature multipliers without base_bet use hundredths', () => {
+  const p=summarizeBgamingBootstrap({
+    body:{
+      api_version:'2',
+      options:{
+        available_bets:[25,100],
+        default_bet:25,
+        currency:{subunits:100,exponent:2},
+        feature_options:{
+          feature_multipliers:{
+            freespin_chance:132,
+            bonus_buy:4000,
+            freespin_buy:4800,
+          },
+          disabled_features:[],
+        },
+      },
+      flow:{available_actions:['init','spin']},
+    },
+    request:null,
+  });
+  assert.deepEqual(
+    p.special_modes.map(x=>[x.feature,x.multiplier]),
+    [['freespin_chance',1.32],['bonus_buy',40],['freespin_buy',48]],
+  );
+  assert.equal(bgamingNeedsReview(p),false);
+});
+
+test('JSONRPC purchased_features remain unresolved capabilities, not wager modes', () => {
+  const p=summarizeBgamingJsonRpcInit({
+    body:{jsonrpc:'2.0',result:{
+      currency_attributes:{code:'FUN',subunits:100},
+      config:{
+        bet_limits:[20,100],
+        default_bet:100,
+        purchased_features:['buy_bonus','bonus_buy','freespin_chance'],
+      },
+    }},
+    request:null,
+  });
+  assert.deepEqual(p.special_modes,[]);
+  assert.deepEqual(p.purchased_feature_capabilities,['buy_bonus','bonus_buy','freespin_chance']);
+  assert.equal(bgamingNeedsReview(p),true);
+});
