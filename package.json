@@ -12,8 +12,9 @@
     "capture": "node src/cli.js capture",
     "batch": "node src/cli.js batch",
     "test": "node --test",
-    "check": "node --check src/server.js && node --check src/browser-service.js && node --check src/network-recorder.js && node --check src/splash-skipper.js && node --check src/target-list.js && node --check src/providers/three-oaks.js && node --check src/providers/three-oaks-runtime.js && node --check src/cli.js && node --check scripts/analyze-targets.js && node --check scripts/merge-exhaustive-results.js",
-    "analyze:targets": "node scripts/analyze-targets.js"
+    "check": "node --check src/server.js && node --check src/browser-service.js && node --check src/network-recorder.js && node --check src/splash-skipper.js && node --check src/target-list.js && node --check src/providers/three-oaks.js && node --check src/providers/three-oaks-runtime.js && node --check src/cli.js && node --check scripts/analyze-targets.js && node --check scripts/merge-exhaustive-results.js && node --check scripts/run-visual-plan.js",
+    "analyze:targets": "node scripts/analyze-targets.js",
+    "visual:plan": "node scripts/run-visual-plan.js"
   },
   "dependencies": {
     "playwright": "1.63.0"
