@@ -107,3 +107,15 @@ For the current 3 Oaks target list:
 4. repeated UI layouts have a visually verified profile;
 5. every special mode is runtime validated by real click evidence where the demo permits it;
 6. final artifacts merge the full target set without silently dropping failures.
+
+
+## Runtime proof levels
+
+Runtime evidence is deliberately tiered so transport proof is not confused with UI reachability:
+
+- `VALIDATED_VISUAL`: a real viewport click sequence emitted the expected `gsc=play` request and the server accepted it.
+- `VALIDATED_NATIVE`: the loaded game client's own provider method emitted the expected `gsc=play` request and the server accepted it.
+- `VALIDATED_PROTOCOL_REPLAY`: the mode was declared by the authoritative `start` response and a fresh browser session's exact demo endpoint accepted a replayed `gsc=play` request for that declared mode. This confirms protocol validity but is not presented as proof that GitHub's renderer exposed the UI control.
+- `VALIDATED_REQUEST_RECOGNIZED` / `VALIDATED_REPLAY_RECOGNIZED`: the expected declared request was emitted/accepted at the transport layer but the demo backend could not execute it (for example `FUNDS_EXCEED` or a provider runtime error).
+
+The catalog remains complete from `start` declarations even when GitHub-hosted Chromium cannot render a provider UI. Runtime evidence augments discovery; it never deletes a declared mode.
