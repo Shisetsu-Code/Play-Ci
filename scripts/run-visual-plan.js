@@ -172,12 +172,15 @@ async function runJob(service, job) {
         `${prefix}-${step.label}.png`,
       );
 
+      // Re-read the recorder after any visual wait. Some WebGL clients emit
+      // the economic request hundreds of milliseconds after the pointer event.
+      const refreshed = service.getNetwork(session.id, result.networkMarkerBefore);
       const slice = {
         marker_before: result.networkMarkerBefore,
-        marker_after: result.networkMarkerAfter,
+        marker_after: refreshed.latest,
         activity: result.activity,
         quiet: result.quiet,
-        events: economicEvents(result.events),
+        events: economicEvents(refreshed.events),
       };
       const sliceFile = path.join(jobDir, `${prefix}-${step.label}-network.json`);
       await fs.writeFile(sliceFile, JSON.stringify(slice, null, 2), 'utf8');
