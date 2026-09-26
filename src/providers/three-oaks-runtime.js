@@ -63,6 +63,7 @@ export async function inspectThreeOaksRuntime(page) {
               : null,
       },
       spin: {
+        grEvents: usable(window.GR?.UI?.Events?.spin),
         testActions: usable(ta?.spin),
         board: usable(board?.spin),
       },
@@ -97,8 +98,8 @@ export async function waitForThreeOaksCapability(page, task, {
       task.kind === 'buy'
         ? last.buy.ready
         : task.kind === 'booster'
-          ? last.booster.ready && (last.spin.testActions || last.spin.board)
-          : last.spin.testActions || last.spin.board;
+          ? last.booster.ready && (last.spin.grEvents || last.spin.testActions || last.spin.board)
+          : last.spin.grEvents || last.spin.testActions || last.spin.board;
 
     if (ready) {
       return {
@@ -172,6 +173,23 @@ export async function invokeThreeOaksTask(page, task, { clientFamily = 'unknown'
       };
 
       const ta = window.TestActions;
+
+      // Several 3 Oaks clients only wire the higher purchase options after the
+      // economic popup has been opened. Opening it is side-effect free and
+      // mirrors the visible user path before invoking the provider's own
+      // purchase method.
+      if (clientFamily !== 'kendoo') {
+        try {
+          if (usable(ta?.openBuyFeaturePopup)) {
+            ta.openBuyFeaturePopup();
+            await new Promise((resolve) => setTimeout(resolve, 300));
+          } else if (usable(window.app?.board?.buyFeaturePopup?.show)) {
+            window.app.board.buyFeaturePopup.show();
+            await new Promise((resolve) => setTimeout(resolve, 300));
+          }
+        } catch {}
+      }
+
       const directCandidates = [
         ['app.board.buyFeature.actBuyFeature', window.app?.board?.buyFeature],
         ['app.board.buyBonus.actBuyFeature', window.app?.board?.buyBonus],
@@ -290,12 +308,12 @@ export async function invokeThreeOaksTask(page, task, { clientFamily = 'unknown'
       }
 
       try {
-        if (usable(ta?.spin)) {
-          ta.spin();
+        if (usable(window.GR?.UI?.Events?.spin)) {
+          window.GR.UI.Events.spin();
           return {
             invoked: true,
             hook: selectedHook,
-            spinHook: 'TestActions.spin',
+            spinHook: 'GR.UI.Events.spin',
             argument: mode,
           };
         }
@@ -306,6 +324,16 @@ export async function invokeThreeOaksTask(page, task, { clientFamily = 'unknown'
             invoked: true,
             hook: selectedHook,
             spinHook: 'app.board.spin',
+            argument: mode,
+          };
+        }
+
+        if (usable(ta?.spin)) {
+          ta.spin();
+          return {
+            invoked: true,
+            hook: selectedHook,
+            spinHook: 'TestActions.spin',
             argument: mode,
           };
         }
@@ -340,13 +368,17 @@ export async function invokeThreeOaksTask(page, task, { clientFamily = 'unknown'
 
       const ta = window.TestActions;
       try {
-        if (usable(ta?.spin)) {
-          ta.spin();
-          return { invoked: true, hook: 'TestActions.spin' };
+        if (usable(window.GR?.UI?.Events?.spin)) {
+          window.GR.UI.Events.spin();
+          return { invoked: true, hook: 'GR.UI.Events.spin' };
         }
         if (usable(window.app?.board?.spin)) {
           window.app.board.spin();
           return { invoked: true, hook: 'app.board.spin' };
+        }
+        if (usable(ta?.spin)) {
+          ta.spin();
+          return { invoked: true, hook: 'TestActions.spin' };
         }
       } catch (error) {
         return {
