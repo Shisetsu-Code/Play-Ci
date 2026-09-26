@@ -1266,7 +1266,13 @@ async function runAdaptiveValidation(service, groups) {
         results.push(item);
         if (item?.status === 'DEFERRED_PROVIDER_BLOCK') {
           providerBlockStreak += 1;
-        } else if (item?.status === 'VALIDATED_NATIVE') {
+        } else if ([
+          'VALIDATED_NATIVE',
+          'VALIDATED_VISUAL',
+          'VALIDATED_REQUEST_RECOGNIZED',
+          'VALIDATED_PROTOCOL_REPLAY',
+          'VALIDATED_REPLAY_RECOGNIZED',
+        ].includes(item?.status)) {
           providerBlockStreak = 0;
         }
 
