@@ -43,6 +43,55 @@ function firstFinite(value) {
   return Number.isFinite(Number(value)) ? Number(value) : null;
 }
 
+
+export function enumerateThreeOaksBaseBets(settings = {}) {
+  const bets = Array.isArray(settings.bets) ? settings.bets.map(Number).filter(Number.isFinite) : [];
+  const lines = Array.isArray(settings.lines) && settings.lines.length
+    ? settings.lines.map(Number).filter(Number.isFinite)
+    : [1];
+  const denominator = Number(settings.currency_format?.denominator || 1) || 1;
+  const rawFactors = Array.isArray(settings.bet_factor)
+    ? settings.bet_factor.map(Number)
+    : [Number(settings.bet_factor)];
+
+  const factors = lines.map((line, index) => {
+    const candidate = rawFactors[index];
+    if (Number.isFinite(candidate) && candidate > 0) return candidate;
+    if (rawFactors.length === 1 && Number.isFinite(rawFactors[0]) && rawFactors[0] > 0) {
+      return rawFactors[0];
+    }
+    return null;
+  });
+
+  const configurations = lines.map((line, index) => {
+    const factor = factors[index];
+    return {
+      lines: line,
+      bet_factor: factor,
+      amounts: bets.map((rawBet) => ({
+        raw_bet: rawBet,
+        amount: factor == null ? null : (rawBet * factor) / denominator,
+      })),
+    };
+  });
+
+  const uniqueAmounts = [...new Set(
+    configurations
+      .flatMap((entry) => entry.amounts)
+      .map((entry) => entry.amount)
+      .filter((value) => Number.isFinite(value))
+  )].sort((a, b) => a - b);
+
+  return {
+    denominator,
+    raw_bets: bets,
+    configurations,
+    unique_amounts: uniqueAmounts,
+    min_amount: uniqueAmounts[0] ?? null,
+    max_amount: uniqueAmounts.at(-1) ?? null,
+  };
+}
+
 export function summarizeThreeOaksStart(start) {
   const body = start.body;
   const context = body.context || {};
@@ -68,6 +117,8 @@ export function summarizeThreeOaksStart(start) {
     : Object.fromEntries(legacyBuyPrices.map((price, index) => [String(index), price]));
   const boosters = Array.isArray(context.available_booster) ? context.available_booster : [];
   const fixedBuyMultiplier = Number(settings.freespins_buying_price);
+
+  const baseBets = enumerateThreeOaksBaseBets(settings);
 
   return {
     provider: '3oaks',
@@ -101,6 +152,7 @@ export function summarizeThreeOaksStart(start) {
     initial_bet_per_line: context.spins?.bet_per_line ?? null,
     initial_lines: context.spins?.lines ?? null,
     display_bet: betFactor && denominator ? (betPerLine * betFactor) / denominator : null,
+    base_bets: baseBets,
   };
 }
 
