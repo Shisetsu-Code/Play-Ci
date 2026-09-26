@@ -120,7 +120,7 @@ function normalizeModernFeatures(options) {
         feature: name,
         level: null,
         raw_value: raw,
-        multiplier: Number.isFinite(base) && base > 0 ? round(raw / base) : null,
+        multiplier: Number.isFinite(base) && base > 0 ? round(raw / base) : round(raw / 100),
         source: 'options.feature_options.feature_multipliers',
       });
       continue;
@@ -135,7 +135,7 @@ function normalizeModernFeatures(options) {
           feature: name,
           level: String(level),
           raw_value: raw,
-          multiplier: Number.isFinite(base) && base > 0 ? round(raw / base) : null,
+          multiplier: Number.isFinite(base) && base > 0 ? round(raw / base) : round(raw / 100),
           source: 'options.feature_options.feature_multipliers',
         });
       }
@@ -223,6 +223,7 @@ export function summarizeBgamingBootstrap(start) {
     layout: options.layout || null,
     base_bet_reference: modernFeatures.base_bet_reference,
     disabled_features: modernFeatures.disabled_features,
+    purchased_feature_capabilities: [],
     special_modes: features,
     buy_modes: features.filter((entry) => entry.kind === 'buy'),
     boosters: features.filter((entry) => entry.kind === 'booster'),
@@ -238,16 +239,14 @@ export function summarizeBgamingJsonRpcInit(start) {
   const currency = result.currency_attributes || {};
   const subunits = Number(currency.subunits || (Number.isFinite(Number(currency.exponent)) ? 10 ** Number(currency.exponent) : 100));
   const rawBets = finiteNumbers(config.bet_limits);
-  const purchased = Array.isArray(config.purchased_features) ? config.purchased_features : [];
+  const purchased = Array.isArray(config.purchased_features)
+    ? config.purchased_features.map((feature) => String(feature))
+    : [];
 
-  const specialModes = purchased.map((feature) => ({
-    kind: featureKind(feature),
-    feature: String(feature),
-    level: null,
-    raw_value: null,
-    multiplier: null,
-    source: 'result.config.purchased_features',
-  }));
+  // JSONRPC `purchased_features` is an engine capability list, not a
+  // game-specific declaration of visible purchases/prices. Do not promote
+  // these aliases into wager modes until game-specific evidence resolves them.
+  const specialModes = [];
 
   return {
     provider: 'bgaming',
@@ -272,6 +271,7 @@ export function summarizeBgamingJsonRpcInit(start) {
     layout: null,
     base_bet_reference: null,
     disabled_features: [],
+    purchased_feature_capabilities: purchased,
     special_modes: specialModes,
     buy_modes: specialModes.filter((entry) => entry.kind === 'buy'),
     boosters: specialModes.filter((entry) => entry.kind === 'booster'),
@@ -294,8 +294,18 @@ export function bgamingReviewReasons(protocol) {
   if (!['v2','legacy','jsonrpc'].includes(protocol?.generation)) {
     reasons.push({code:'UNKNOWN_BGAMING_GENERATION'});
   }
+  if (
+    protocol?.generation === 'jsonrpc' &&
+    (protocol?.purchased_feature_capabilities || []).length > 0
+  ) {
+    reasons.push({
+      code:'JSONRPC_FEATURE_CAPABILITIES_UNRESOLVED',
+      capabilities:protocol.purchased_feature_capabilities,
+    });
+  }
+
   for (const mode of protocol?.special_modes || []) {
-    if (!Number.isFinite(Number(mode.multiplier))) {
+    if (mode.multiplier == null || !Number.isFinite(Number(mode.multiplier))) {
       reasons.push({
         code:'SPECIAL_MODE_PRICE_UNRESOLVED',
         feature:mode.feature,
@@ -328,7 +338,7 @@ export function buildBgamingExecutionBlueprints(protocol) {
       purchased_feature:feature.feature,
     };
     if (feature.level != null) {
-      options.purchased_feature_level = '<LEVEL_MAPPING_REQUIRED>'; 
+      options.purchased_feature_level = String(feature.level);
     }
     out.push({
       kind:feature.kind,
@@ -359,5 +369,6 @@ export function bgamingCatalog(protocol) {
     buy_modes: protocol?.buy_modes || [],
     boosters: protocol?.boosters || [],
     other_features: protocol?.other_features || [],
+    purchased_feature_capabilities: protocol?.purchased_feature_capabilities || [],
   };
 }
