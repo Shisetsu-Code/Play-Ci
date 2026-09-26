@@ -1364,7 +1364,7 @@ function countDeclared(targets, kind) {
 function gameSlug(url) {
   try {
     const parsed = new URL(url);
-    const match = parsed.pathname.match(/\/games\/([^/]+)\//);
+    const match = parsed.pathname.match(/\/(?:games|play)\/([^/]+)\//);
     return match?.[1] || parsed.pathname;
   } catch {
     return url;
@@ -1374,6 +1374,53 @@ function gameSlug(url) {
 function buildBetCatalog(targets) {
   return targets.map((target) => {
     const protocol = target.protocol || {};
+
+    if (target.provider === 'bgaming') {
+      const bg = bgamingCatalog(protocol);
+      return {
+        game: gameSlug(target.url),
+        url: target.url,
+        provider: 'bgaming',
+        client_family: target.client_family || 'unknown',
+        discovery_status: target.status || (target.ok ? 'DISCOVERED' : 'ERROR'),
+        actions: protocol.actions || [],
+        unhandled_actions: [],
+        raw_bets: bg.raw_bets,
+        bet_factors: [],
+        lines: protocol.lines || [],
+        denominator: protocol.currency?.subunits ?? null,
+        bet_encoding: bg.bet_encoding,
+        default_bet_raw: bg.default_bet_raw,
+        default_bet_display: bg.default_bet_display,
+        line_count: bg.line_count,
+        display_bets: bg.display_bets,
+        bets_by_factor: [],
+        buy_modes: bg.buy_modes.map((mode) => ({
+          feature: mode.feature,
+          level: mode.level,
+          multiplier: mode.multiplier,
+          raw_value: mode.raw_value,
+          action: 'spin',
+          evidence: 'server_init',
+        })),
+        boosters: bg.boosters.map((mode) => ({
+          feature: mode.feature,
+          level: mode.level,
+          multiplier: mode.multiplier,
+          raw_value: mode.raw_value,
+          action: 'spin',
+          evidence: 'server_init',
+        })),
+        special_modes: bg.special_modes,
+        other_features: bg.other_features,
+        bootstrap_maps: protocol.bootstrap_maps || [],
+        catalog_status:
+          target.ok && target.status === 'DISCOVERED'
+            ? 'COMPLETE'
+            : 'REQUIRES_REVIEW',
+      };
+    }
+
     const effective = target.provider === '3oaks'
       ? threeOaksEffectiveBets(protocol)
       : {
@@ -1397,6 +1444,10 @@ function buildBetCatalog(targets) {
       bet_factors: effective.factors,
       lines: effective.lines,
       denominator: effective.denominator,
+      bet_encoding: null,
+      default_bet_raw: null,
+      default_bet_display: null,
+      line_count: Array.isArray(effective.lines) ? effective.lines.length : null,
       display_bets: effective.display_bets,
       bets_by_factor: effective.by_factor,
       buy_modes: [
@@ -1428,6 +1479,9 @@ function buildBetCatalog(targets) {
         ante_bet: protocol.booster_prices?.[String(mode)] ?? null,
         evidence: 'server_start',
       })),
+      special_modes: [],
+      other_features: [],
+      bootstrap_maps: [],
       catalog_status:
         target.provider === '3oaks' && target.ok && target.status === 'DISCOVERED'
           ? 'COMPLETE'
@@ -1454,9 +1508,16 @@ function catalogCsv(catalog) {
     'bet_factors',
     'lines',
     'denominator',
+    'bet_encoding',
+    'default_bet_raw',
+    'default_bet_display',
+    'line_count',
     'display_bets',
     'buy_modes',
     'boosters',
+    'special_modes',
+    'other_features',
+    'bootstrap_maps',
   ];
 
   const rows = [columns.map(csvCell).join(',')];
@@ -1480,6 +1541,7 @@ function markdown(report) {
     `- Requires review: ${report.summary.requires_review}`,
     `- Declared buy modes: ${report.summary.declared_buy_modes}`,
     `- Declared booster modes: ${report.summary.declared_booster_modes}`,
+    `- Declared other feature modes: ${report.summary.declared_other_features}`,
     `- Execution blueprints: ${report.summary.execution_blueprints}`,
     `- Runtime validation enabled: ${report.policy.runtime_validation_enabled}`,
     `- Runtime validations attempted: ${report.summary.runtime_attempted}`,
@@ -1595,6 +1657,7 @@ try {
       requires_review: targets.filter((entry) => entry?.status === 'REQUIRES_REVIEW').length,
       declared_buy_modes: countDeclared(targets, 'buy'),
       declared_booster_modes: countDeclared(targets, 'booster'),
+      declared_other_features: countDeclared(targets, 'feature'),
       execution_blueprints: targets.reduce((sum, target) => sum + (target.execution_blueprints || []).length, 0),
       runtime_attempted: validations.filter((entry) => !entry.reason?.includes('circuit_open')).length,
       runtime_validated: validations.filter((entry) =>
