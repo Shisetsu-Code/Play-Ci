@@ -25,27 +25,25 @@ try{
   const result={game:'SugarMix',ok:false};
   try{
     await sleep(8000);
-    for(const [label,x,y,wait] of [
-      ['startup-1',640,650,2500],
-      ['startup-2',640,615,2200],
-    ]){
-      await internal.page.mouse.click(x,y);
-      await sleep(wait);
-      const shot=await service.capture(s.id,label);
-      await fs.copyFile(path.resolve(shot.path),path.join(dir,label+'.png'));
-    }
-
-    const gameShot=await service.capture(s.id,'game');
-    await fs.copyFile(path.resolve(gameShot.path),path.join(dir,'game.png'));
-
-    const marker=internal.recorder.marker();
+    await internal.page.mouse.click(640,650);
+    await sleep(2500);
+    await internal.page.mouse.click(640,615);
+    await sleep(2200);
     await internal.page.mouse.click(200,390);
     await sleep(1000);
+
     const menuShot=await service.capture(s.id,'menu');
     await fs.copyFile(path.resolve(menuShot.path),path.join(dir,'menu.png'));
 
+    const marker=internal.recorder.marker();
+    await internal.page.mouse.click(640,540);
+    await sleep(1800);
+    await internal.recorder.waitForQuiet({quietMs:600,timeoutMs:5000}).catch(()=>{});
+
+    const afterShot=await service.capture(s.id,'after-buy');
+    await fs.copyFile(path.resolve(afterShot.path),path.join(dir,'after-buy.png'));
     const events=compact(internal.recorder.eventsAfter(0),marker);
-    await fs.writeFile(path.join(dir,'open-events.json'),JSON.stringify(events,null,2),'utf8');
+    await fs.writeFile(path.join(dir,'events.json'),JSON.stringify(events,null,2),'utf8');
     result.ok=true;
     result.requests=events.filter(e=>e.type==='request').map(e=>({url:e.url,method:e.method,postData:e.postData}));
   }catch(error){
