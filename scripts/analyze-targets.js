@@ -16,6 +16,14 @@ import {
   threeOaksEffectiveBets,
 } from '../src/providers/three-oaks.js';
 import {
+  extractBgamingBootstrap,
+  summarizeBgamingBootstrap,
+  bgamingNeedsReview,
+  bgamingReviewReasons,
+  buildBgamingExecutionBlueprints,
+  bgamingCatalog,
+} from '../src/providers/bgaming.js';
+import {
   waitForThreeOaksCapability,
   dismissThreeOaksStart as dismissThreeOaksRuntimeStart,
   invokeThreeOaksTask,
@@ -112,7 +120,7 @@ function detectThreeOaksClientFamily(events) {
   return 'unknown';
 }
 
-function declaredFeatures(protocol) {
+function threeOaksDeclaredFeatures(protocol) {
   const rows = [];
 
   if (
@@ -157,6 +165,20 @@ function declaredFeatures(protocol) {
   return rows;
 }
 
+function bgamingDeclaredFeatures(protocol) {
+  return (protocol?.special_modes || []).map((mode) => ({
+    kind: mode.kind,
+    action: 'spin',
+    feature: mode.feature,
+    level: mode.level,
+    mode: mode.level,
+    multiplier: mode.multiplier,
+    raw_value: mode.raw_value,
+    evidence: 'server_init',
+    status: 'DECLARED',
+  }));
+}
+
 async function discover(service, url) {
   const started = Date.now();
   const session = await service.createSession({
@@ -182,8 +204,35 @@ async function discover(service, url) {
         duration_ms: Date.now() - started,
         protocol,
         review_reasons: reviewReasons,
-        declared_features: declaredFeatures(protocol),
+        declared_features: threeOaksDeclaredFeatures(protocol),
         execution_blueprints: buildThreeOaksExecutionBlueprints(protocol),
+      };
+    }
+
+    let bgStart = extractBgamingBootstrap(events);
+    if (!bgStart && /bgaming-network\.com/i.test(url)) {
+      const deadline = Date.now() + 8000;
+      while (!bgStart && Date.now() < deadline) {
+        await sleep(200);
+        bgStart = extractBgamingBootstrap(internal.recorder.eventsAfter(0));
+      }
+    }
+
+    if (bgStart) {
+      const protocol = summarizeBgamingBootstrap(bgStart);
+      const reviewReasons = bgamingReviewReasons(protocol);
+      return {
+        ok: true,
+        url,
+        provider: 'bgaming',
+        client_family: `bgaming-${protocol.generation}`,
+        status: bgamingNeedsReview(protocol) ? 'REQUIRES_REVIEW' : 'DISCOVERED',
+        duration_ms: Date.now() - started,
+        protocol,
+        review_reasons: reviewReasons,
+        declared_features: bgamingDeclaredFeatures(protocol),
+        execution_blueprints: buildBgamingExecutionBlueprints(protocol),
+        bootstrap_endpoint: bgStart.request?.url || null,
       };
     }
 
