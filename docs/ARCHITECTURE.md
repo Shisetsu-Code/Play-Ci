@@ -265,3 +265,57 @@ For every game the final catalog should contain at minimum:
 - captured request for validated modes.
 
 No game is considered fully finished if structural declarations remain unexplained.
+
+
+## Reproducible visual plans
+
+`analysis/visual-plan.json` is the durable bridge between GPT vision and GitHub Actions.
+
+Schema:
+
+```json
+{
+  "version": 1,
+  "jobs": [
+    {
+      "id": "example",
+      "url": "https://provider/game",
+      "metadata": {
+        "purpose": "map buy popup"
+      },
+      "steps": [
+        { "type": "wait", "ms": 3000, "label": "settle" },
+        { "type": "click", "x": 640, "y": 670, "label": "dismiss-start", "waitAfterMs": 1500 },
+        { "type": "capture", "label": "game" },
+        { "type": "click", "x": 150, "y": 195, "label": "open-bonus", "waitAfterMs": 1000 }
+      ]
+    }
+  ]
+}
+```
+
+The runner:
+
+```text
+npm run visual:plan
+```
+
+replays the plan in a fresh browser session and writes:
+
+- initial screenshot;
+- screenshot after every wait/capture/click step;
+- a network JSON slice for every click;
+- the complete correlated network trace;
+- a manifest tying the screenshots and requests to exact coordinates.
+
+GitHub Actions is triggered by changing `analysis/visual-trigger.txt`.
+
+This allows a future ChatGPT conversation to:
+
+1. inspect the current screenshot artifact;
+2. decide the next coordinate;
+3. append that click to the plan;
+4. trigger the plan again;
+5. verify the exact request caused by the click.
+
+Because the runner replays the entire click history, browser state does not need to survive between GitHub Actions runs.
