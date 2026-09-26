@@ -797,7 +797,7 @@ async function validateVisualTask(service, discovery, task) {
     const serverCode = play.response?.status?.code ?? null;
     const recognizedButNotExecutable =
       semanticMatch &&
-      ['FUNDS_EXCEED'].includes(serverCode);
+      ['FUNDS_EXCEED', 'SERVER_ERROR'].includes(serverCode);
 
     return {
       ok: semanticMatch && (play.accepted || recognizedButNotExecutable),
