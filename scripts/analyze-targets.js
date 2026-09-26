@@ -20,6 +20,13 @@ import {
   invokeThreeOaksTask,
   triggerThreeOaksSpinControl,
 } from '../src/providers/three-oaks-runtime.js';
+import {
+  loadVisualProfiles,
+  indexVisualProfiles,
+  matchVisualProfile,
+  coordinateForBuy,
+  coordinateForBooster,
+} from '../src/visual-profiles.js';
 
 const TARGET_FILE = path.resolve(process.env.TARGET_FILE || 'analysis/targets.txt');
 const OUTPUT_DIR = path.resolve(process.env.ANALYSIS_OUTPUT_DIR || 'artifacts/analysis');
@@ -32,6 +39,8 @@ const VALIDATION_READY_TIMEOUT_MS = envInt('ANALYSIS_VALIDATION_READY_TIMEOUT_MS
 const VALIDATION_ACTIVITY_TIMEOUT_MS = envInt('ANALYSIS_VALIDATION_ACTIVITY_TIMEOUT_MS', 5000, 1000, 20000);
 const MAX_PROVIDER_BLOCK_STREAK = envInt('ANALYSIS_MAX_PROVIDER_BLOCK_STREAK', 2, 1, 10);
 const RUNTIME_VALIDATION = envBool('ANALYSIS_RUNTIME_VALIDATION', false);
+const RUNTIME_MODE = String(process.env.ANALYSIS_RUNTIME_MODE || 'visual').toLowerCase();
+const VISUAL_CAPTURE_EVIDENCE = envBool('ANALYSIS_VISUAL_CAPTURE_EVIDENCE', true);
 const VALIDATE_ALL_MODES = envBool('ANALYSIS_VALIDATE_ALL_MODES', false);
 const VALIDATE_BASE_SPIN = envBool('ANALYSIS_VALIDATE_BASE_SPIN', false);
 const VALIDATE_EVERY_TARGET = envBool('ANALYSIS_VALIDATE_EVERY_TARGET', false);
@@ -578,6 +587,234 @@ function selectTaskPlay(plays, task) {
   return plays[0];
 }
 
+
+let visualProfileIndexPromise = null;
+const visualEvidenceCaptured = new Set();
+
+async function getVisualProfile(discovery) {
+  if (!visualProfileIndexPromise) {
+    visualProfileIndexPromise = loadVisualProfiles()
+      .then((raw) => indexVisualProfiles(raw));
+  }
+  const index = await visualProfileIndexPromise;
+  return matchVisualProfile(index, discovery);
+}
+
+function profilePointSequence(entry) {
+  if (!entry) return [];
+  if (Array.isArray(entry.clicks)) return entry.clicks;
+  if (Number.isFinite(Number(entry.x)) && Number.isFinite(Number(entry.y))) {
+    return [{
+      x: Number(entry.x),
+      y: Number(entry.y),
+      waitAfterMs: Number(entry.waitAfterMs || 0),
+    }];
+  }
+  return [];
+}
+
+async function clickProfileSequence(page, entry, defaultWaitMs = 0) {
+  const points = profilePointSequence(entry);
+  for (const point of points) {
+    await page.mouse.click(Number(point.x), Number(point.y));
+    const waitMs = Number(point.waitAfterMs ?? defaultWaitMs);
+    if (waitMs > 0) await sleep(waitMs);
+  }
+  return points;
+}
+
+async function captureVisualEvidence(service, sessionId, discovery, profile) {
+  if (!VISUAL_CAPTURE_EVIDENCE || visualEvidenceCaptured.has(discovery.url)) return null;
+  visualEvidenceCaptured.add(discovery.url);
+
+  const screenshot = await service.capture(sessionId, 'visual-profile-popup');
+  const dir = path.join(OUTPUT_DIR, 'visual-evidence', gameSlug(discovery.url));
+  await fs.mkdir(dir, { recursive: true });
+  const destination = path.join(dir, `${profile.id}-popup.png`);
+  await fs.copyFile(path.resolve(screenshot.path), destination);
+  return path.relative(process.cwd(), destination);
+}
+
+async function validateVisualTask(service, discovery, task) {
+  const started = Date.now();
+  const profile = await getVisualProfile(discovery);
+
+  if (!profile) {
+    return {
+      ok: false,
+      url: discovery.url,
+      provider: '3oaks',
+      client_family: discovery.client_family,
+      kind: task.kind,
+      mode: task.mode,
+      declared_multiplier: task.declaredMultiplier ?? 1,
+      status: 'VISUAL_PROFILE_MISSING',
+      duration_ms: Date.now() - started,
+    };
+  }
+
+  const option = task.kind === 'buy'
+    ? coordinateForBuy(profile, task.modeIndex ?? 0)
+    : task.kind === 'booster'
+      ? coordinateForBooster(profile, task.modeIndex ?? 0)
+      : profile.spin;
+
+  if (!option || !profile.dismiss || (task.kind !== 'spin' && !profile.open_economic)) {
+    return {
+      ok: false,
+      url: discovery.url,
+      provider: '3oaks',
+      client_family: discovery.client_family,
+      kind: task.kind,
+      mode: task.mode,
+      declared_multiplier: task.declaredMultiplier ?? 1,
+      status: 'VISUAL_PROFILE_INCOMPLETE',
+      visual_profile: profile.id,
+      duration_ms: Date.now() - started,
+    };
+  }
+
+  const session = await service.createSession({
+    url: discovery.url,
+    skipSplash: false,
+    captureInitialScreenshot: false,
+  });
+
+  try {
+    const internal = service.sessions.get(session.id);
+    const waits = profile.waits || {};
+
+    if (Number(waits.initial_ms) > 0) await sleep(Number(waits.initial_ms));
+    await clickProfileSequence(internal.page, profile.dismiss, Number(waits.after_dismiss_ms || 0));
+
+    if (task.kind !== 'spin') {
+      await clickProfileSequence(internal.page, profile.open_economic, Number(waits.after_open_ms || 0));
+    }
+
+    const evidenceScreenshot = task.kind !== 'spin'
+      ? await captureVisualEvidence(service, session.id, discovery, profile)
+      : null;
+
+    const marker = internal.recorder.marker();
+    let clickEvidence = null;
+
+    if (task.kind === 'buy') {
+      clickEvidence = await clickProfileSequence(
+        internal.page,
+        option,
+        Number(waits.after_option_ms || 0),
+      );
+    } else if (task.kind === 'booster') {
+      const selectClicks = await clickProfileSequence(
+        internal.page,
+        option,
+        Number(waits.after_booster_select_ms || 0),
+      );
+      const spinClicks = await clickProfileSequence(
+        internal.page,
+        profile.spin,
+        Number(waits.after_spin_ms || 0),
+      );
+      clickEvidence = { select: selectClicks, spin: spinClicks };
+    } else {
+      clickEvidence = await clickProfileSequence(
+        internal.page,
+        profile.spin,
+        Number(waits.after_spin_ms || waits.after_option_ms || 0),
+      );
+    }
+
+    await internal.recorder.waitForActivityAfter(marker, {
+      timeoutMs: VALIDATION_ACTIVITY_TIMEOUT_MS,
+    });
+    await internal.recorder.waitForQuiet({
+      quietMs: 500,
+      timeoutMs: Math.max(5000, VALIDATION_ACTIVITY_TIMEOUT_MS + 3000),
+    });
+
+    const plays = classifyThreeOaksPlay(internal.recorder.eventsAfter(0), marker);
+    if (plays.length === 0) {
+      const failureShot = VISUAL_CAPTURE_EVIDENCE
+        ? await service.capture(session.id, 'visual-no-request').catch(() => null)
+        : null;
+      let failureScreenshot = null;
+      if (failureShot?.path) {
+        const dir = path.join(OUTPUT_DIR, 'visual-evidence', gameSlug(discovery.url));
+        await fs.mkdir(dir, { recursive: true });
+        const destination = path.join(
+          dir,
+          `${profile.id}-${task.kind}-${task.mode ?? 'fixed'}-no-request.png`,
+        );
+        await fs.copyFile(path.resolve(failureShot.path), destination);
+        failureScreenshot = path.relative(process.cwd(), destination);
+      }
+
+      return {
+        ok: false,
+        url: discovery.url,
+        provider: '3oaks',
+        client_family: discovery.client_family,
+        kind: task.kind,
+        mode: task.mode,
+        declared_multiplier: task.declaredMultiplier ?? 1,
+        status: 'VISUAL_NO_REQUEST',
+        visual_profile: profile.id,
+        visual_clicks: clickEvidence,
+        visual_evidence: evidenceScreenshot,
+        failure_screenshot: failureScreenshot,
+        duration_ms: Date.now() - started,
+      };
+    }
+
+    const play = selectTaskPlay(plays, task);
+    const providerBlocked = [403, 429].includes(play.http_status);
+    const semanticMatch = validationMatchesTask(play, task);
+    const serverCode = play.response?.status?.code ?? null;
+    const recognizedButNotExecutable =
+      semanticMatch &&
+      ['FUNDS_EXCEED'].includes(serverCode);
+
+    return {
+      ok: semanticMatch && (play.accepted || recognizedButNotExecutable),
+      url: discovery.url,
+      provider: '3oaks',
+      client_family: discovery.client_family,
+      kind: task.kind,
+      mode: task.mode,
+      declared_multiplier: task.declaredMultiplier ?? 1,
+      status: providerBlocked
+        ? 'DEFERRED_PROVIDER_BLOCK'
+        : semanticMatch && play.accepted
+          ? 'VALIDATED_VISUAL'
+          : recognizedButNotExecutable
+            ? 'VALIDATED_REQUEST_RECOGNIZED'
+            : play.accepted
+              ? 'VISUAL_MODE_MISMATCH'
+              : 'VISUAL_REJECTED',
+      duration_ms: Date.now() - started,
+      visual_profile: profile.id,
+      visual_clicks: clickEvidence,
+      visual_evidence: evidenceScreenshot,
+      request: play.request,
+      semantic_match: semanticMatch,
+      request_recognized: recognizedButNotExecutable,
+      response: {
+        http_status: play.http_status,
+        server_status: play.response?.status ?? null,
+        command: play.response?.command ?? null,
+        last_action: play.response?.context?.last_action ?? null,
+        last_args: play.response?.context?.last_args ?? null,
+        next_actions: play.response?.context?.actions ?? null,
+        round_finished: play.response?.context?.round_finished ?? null,
+        balance: play.response?.user?.balance ?? null,
+        currency: play.response?.user?.currency ?? null,
+      },
+    };
+  } finally {
+    await service.closeSession(session.id);
+  }
+}
+
 async function validateNativeTask(service, discovery, task) {
   const started = Date.now();
   const session = await service.createSession({
@@ -764,7 +1001,9 @@ function validationGroups(discoveries) {
 async function validateGroup(service, group) {
   const results = [];
   for (const task of group.tasks) {
-    const result = await validateNativeTask(service, group.discovery, task);
+    const result = RUNTIME_MODE === 'visual'
+      ? await validateVisualTask(service, group.discovery, task)
+      : await validateNativeTask(service, group.discovery, task);
     results.push({
       ...result,
       validation_signature: group.signature,
@@ -1044,6 +1283,9 @@ try {
     'DECLARED_CLIENT_NOT_READY',
     'DECLARED_NATIVE_HOOK_UNAVAILABLE',
     'DECLARED_NATIVE_NO_REQUEST',
+    'VISUAL_PROFILE_MISSING',
+    'VISUAL_PROFILE_INCOMPLETE',
+    'VISUAL_NO_REQUEST',
   ]);
 
   const catalog = buildBetCatalog(targets);
@@ -1062,6 +1304,7 @@ try {
       validate_every_target: VALIDATE_EVERY_TARGET,
       max_provider_block_streak: MAX_PROVIDER_BLOCK_STREAK,
       runtime_validation_enabled: RUNTIME_VALIDATION,
+      runtime_mode: RUNTIME_MODE,
       runtime_validation_role: 'supplemental only; server start declarations are authoritative discovery evidence',
       runtime_validation_scope: RUNTIME_VALIDATION
         ? (VALIDATE_EVERY_TARGET
@@ -1084,7 +1327,7 @@ try {
       execution_blueprints: targets.reduce((sum, target) => sum + (target.execution_blueprints || []).length, 0),
       runtime_attempted: validations.filter((entry) => !entry.reason?.includes('circuit_open')).length,
       runtime_validated: validations.filter((entry) =>
-        ['VALIDATED_NATIVE', 'VALIDATED_REQUEST_RECOGNIZED'].includes(entry?.status)
+        ['VALIDATED_NATIVE', 'VALIDATED_VISUAL', 'VALIDATED_REQUEST_RECOGNIZED'].includes(entry?.status)
       ).length,
       runtime_unavailable: validations.filter((entry) => runtimeUnavailableStatuses.has(entry?.status)).length,
       runtime_deferred: validations.filter((entry) => entry?.status === 'DEFERRED_PROVIDER_BLOCK').length,
