@@ -1,278 +1,300 @@
 # PROJECT HANDOFF — read this first in a new chat
 
-## Repository
+## Repository and branch
+
+Repository:
 
 `Shisetsu-Code/Play-Ci`
 
-Current development line during this handoff:
+Current development branch:
 
 `feat/playwright-visual-probe`
 
-There is an open PR (#1) into `main`.
+Open pull request:
+
+`#1 -> main`
 
 Do not merge unless the user explicitly asks.
 
-## What the user wants
+## Objective
 
-The user wants to feed a text file containing game URLs and have ChatGPT/Play-Ci autonomously determine **all wagering options for every game**.
+The user supplies a text file of game URLs. Play-Ci must autonomously build a complete, auditable catalog of every wagering option for every game:
 
-The intended universal mechanism is visual:
+- normal selectable bets;
+- line/factor stake variants;
+- feature buys;
+- fixed and legacy buys;
+- boosters / ante bets;
+- other economically meaningful provider actions.
 
-```text
-Playwright opens game
-→ screenshot
-→ GPT reads screenshot
-→ GPT returns coordinates
-→ Playwright clicks actual visible control
-→ capture resulting request/response
-→ screenshot new state
-→ repeat
-```
+A runtime failure must never silently erase a provider-declared option.
 
-Protocol parsing should make this faster and provide a completeness checklist, but should not replace real visual clicks for runtime proof.
+## Current user workflow
 
-## Why Play-Ci exists
-
-Other project components have different responsibilities:
-
-- Play-Ci: discovery/diagnostics/visual network proof.
-- Tester-definitivo / Testers: stable execution of already understood provider protocols.
-- Crawler repos: catalog/name/thumbnail discovery.
-- Porteo: HAR collection/sanitization/diagnostic evidence.
-
-Do not turn Play-Ci into the final production tester.
-
-## User workflow
-
-The user maintains:
+Input:
 
 `analysis/targets.txt`
 
-A small Windows GUI is available:
+Windows launcher:
 
 `run-analysis-gui.bat`
 
-It:
+The GUI:
 
-1. lets the user select a local targets file;
-2. validates it;
+1. selects a local targets file;
+2. validates URLs;
 3. copies it to `analysis/targets.txt`;
 4. increments `analysis/trigger.txt`;
-5. commits only those analysis files;
+5. commits only the analysis input/trigger files;
 6. pushes the current branch;
-7. triggers GitHub Actions.
+7. opens GitHub Actions.
 
-When the user says **"analiza"**, read the current target list/run artifacts rather than asking them to paste the URLs again.
+When the user says **"analiza"**, inspect the current target list and the latest `Analyze targets` artifact. Do not ask them to paste the URLs again.
 
-## What has already been learned
+## Current 3 Oaks state
 
-### Core Playwright probe
+The current target list contains 110 3 Oaks games.
 
-Implemented:
+Verified catalog-complete baseline:
 
-- fixed 1280×720 viewport;
-- DPR=1;
-- non-full-page PNG screenshots;
-- exact coordinate click API;
-- correlated network recorder;
-- request/response/body capture;
-- conservative DOM splash skipping;
-- canvas/WebGL bootstrap support;
-- click observation window for delayed requests;
-- heavier screenshot timeout for WebGL;
-- optional screenshot capture;
-- multiple browser contexts.
-
-### 3 Oaks
-
-3 Oaks `start` can expose:
-
-- `context.actions`
-- `context.available_buy_bonus`
-- `context.available_booster`
-- `settings.bets`
-- `settings.bet_factor`
-- `settings.lines`
-- `settings.buy_bonus_prices`
-- legacy/fixed buy metadata
-- `settings.booster_prices`
-
-Provider play requests commonly use `Content-Type: text/plain`.
-
-Observed buy request pattern:
-
-```json
-{
-  "command": "play",
-  "action": {
-    "name": "buy_spin",
-    "params": {
-      "bet_per_line": "...",
-      "lines": "...",
-      "selected_mode": "..."
-    }
-  }
-}
+```text
+Targets: 110
+Catalog complete: 110
+Catalog requires review: 0
+Declared special modes: 126
 ```
 
-Observed booster pattern:
+A verified exhaustive run at that baseline had runtime proof for 71 special modes. Since then, runtime code has been hardened further with:
 
-```json
-{
-  "command": "play",
-  "action": {
-    "name": "spin",
-    "params": {
-      "bet_per_line": "...",
-      "lines": "...",
-      "ante_bet": "...",
-      "selected_mode": "..."
-    }
-  }
-}
+- family-aware native invocation;
+- visual profiles;
+- hybrid native/visual validation;
+- fresh-session protocol replay fallback;
+- recognition of accepted semantic requests that cannot complete in the demo environment;
+- longer capability initialization for slower clients;
+- provider block circuit-breaker handling.
+
+Do not claim a newer runtime-validated count until a full merged exhaustive artifact proves it.
+
+## Current architecture
+
+```text
+targets.txt
+  -> Playwright loads real game
+  -> capture 3 Oaks start
+  -> protocol parser builds complete catalog
+  -> optional runtime proof
+       -> visual click
+       -> native client method
+       -> fresh-session replay fallback
+  -> per-mode status
+  -> normal/exhaustive artifacts
 ```
 
-Not every game uses every field.
+For catalog completeness, `start` is authoritative.
 
-### Early live examples
+For UI proof, a real visible click remains strongest.
 
-`4_super_clover_pots`:
+## Important 3 Oaks protocol fields
 
-- 2 buy modes declared;
-- 3 boosters declared;
-- buy prices 75× and 200×;
-- boosters 1.75×, 3×, 7.5×;
-- real browser validation previously confirmed buys and booster behavior.
+```text
+context.actions
+context.available_buy_bonus
+context.available_booster
+context.spins.bet_per_line
+context.spins.lines
 
-`coinup_volcano`:
+settings.bets
+settings.bet_factor
+settings.lines
+settings.currency_format.denominator
+settings.buy_bonus_prices
+settings.buy_bonus_price
+settings.freespins_buying_price
+settings.booster_prices
+```
 
-- 3 buys declared;
-- 30×, 75×, 150×;
-- real server validation previously confirmed all three.
+The provider commonly sends JSON with `Content-Type: text/plain`.
 
-### 110-game run
+## Buy normalization
 
-A target list containing 110 3 Oaks games was analyzed.
+Supported forms:
 
-Important historical result:
+1. modern declared modes via `available_buy_bonus + buy_bonus_prices`;
+2. legacy zero-based modes via `settings.buy_bonus_price[]`;
+3. fixed buy via `settings.freespins_buying_price`;
+4. orphan buy-looking metadata is preserved but not promoted when `buy_spin` is absent.
 
-- protocol discovery worked across essentially the entire set;
-- a naive runtime phase opened too many sessions and caused mass HTTP 403;
-- the architecture was changed to separate discovery from runtime, shard work, lower concurrency and use a circuit breaker;
-- client families observed: `goreel`, `kendoo`, `ratpack`, `hraymo`, `enjoy`.
+## Normal bet formula
 
-A later adaptive run removed the mass 403 problem but exposed false negatives from non-uniform internal hooks.
+```text
+display_bet = raw_bet * bet_factor / denominator
+```
 
-### Critical lesson
+Multiple factors/line modes are retained separately and also merged into a deduplicated display-bet list.
 
-Do **not** treat `TestActions` as a universal provider API.
+## Client families observed
 
-Different families have stubs, different signatures and different mode indexing.
+```text
+goreel
+kendoo
+ratpack
+hraymo
+enjoy
+```
 
-A successful internal hook is not validation.
-A failed internal hook is not evidence that a declared feature is absent.
+Do not treat `TestActions` as a universal API. Different families contain different methods, stubs and mode conventions.
 
-### Rate-limit lesson
+## Kendoo caveat
 
-A previous 110-game validation attempted ~230 runtime actions from one runner and produced mass 403s.
+Kendoo can expose runtime objects while GitHub-hosted Chromium remains visually stuck in a loading state. This was reproduced across headless, SwiftShader, software and headed/Xvfb experiments.
 
-Use:
+Do not interpret that renderer failure as absence of a declared buy.
 
-- shards;
+Use catalog declarations and lower proof tiers when visual proof is not possible in the runner.
+
+## Visual profiles
+
+File:
+
+`analysis/visual-profiles.json`
+
+Currently mapped representative profiles include:
+
+- Goreel buy-2;
+- Enjoy buy-2;
+- Hraymo buy-2;
+- Ratpack buy-2 + booster-3.
+
+Profiles are keyed by client family and option counts. They are execution aids, not proof by themselves.
+
+## Runtime proof statuses
+
+Strongest to weaker:
+
+```text
+VALIDATED_VISUAL
+VALIDATED_NATIVE
+VALIDATED_PROTOCOL_REPLAY
+VALIDATED_REQUEST_RECOGNIZED
+VALIDATED_REPLAY_RECOGNIZED
+```
+
+Pending/deferred statuses remain visible and do not alter declarations.
+
+See `docs/VALIDATION_POLICY.md` for precise definitions.
+
+## Rate-limit history
+
+A naive full run attempted roughly 230 runtime actions from a single GitHub runner and triggered mass 403 responses.
+
+The fix was:
+
+- discovery/runtime separation;
+- sharding;
 - low concurrency;
-- circuit breaker;
-- protocol-first discovery;
-- minimal runtime actions;
-- retry artifacts.
+- batch delays;
+- circuit breaker after repeated 403/429;
+- preserving declarations;
+- retry/deferred artifacts.
 
-## Current important files
+Never restore high-concurrency exhaustive execution from one runner.
 
-- `src/browser-service.js` — Chromium sessions/screenshots/clicks.
-- `src/network-recorder.js` — correlated traffic capture.
-- `src/providers/three-oaks.js` — 3 Oaks declaration parsing/catalog logic.
-- `src/providers/three-oaks-runtime.js` — diagnostic runtime helpers; do not mistake hooks for proof.
-- `scripts/analyze-targets.js` — batch analyzer/report builder.
-- `scripts/merge-exhaustive-results.js` — merges sharded exhaustive output.
-- `.github/workflows/analyze-targets.yml` — normal discovery run.
-- `.github/workflows/exhaustive-3oaks.yml` — sharded exhaustive run.
-- `tools/analysis_gui.py` — Windows launcher GUI.
-- `analysis/targets.txt` — current input list.
+## Normal workflow
 
-## Current architectural correction
+Workflow:
 
-The project briefly drifted toward:
+`.github/workflows/analyze-targets.yml`
 
-`start → internal hook → request`
+Trigger:
 
-That is not the desired final validator.
+`analysis/trigger.txt`
 
-The desired validator is:
+Runtime validation is disabled by default.
 
-`start → screenshot → GPT coordinates → real click → request`
+Outputs include:
 
-The `start` response remains authoritative for declared completeness, while the real UI click establishes the visible-to-wire mapping.
+```text
+analysis-report.json
+analysis-report.md
+bet-catalog.json
+bet-catalog.csv
+protocol-blueprints.json
+unfinished-targets.txt
+review-targets.txt
+retry-targets.txt
+```
 
-## What to do next
+## Exhaustive workflow
 
-1. Finish capturing representative screenshots for each 3 Oaks client family/layout.
-2. Have GPT identify:
-   - startup dismiss area;
-   - bet controls;
-   - buy/bonus button;
-   - buy popup choices;
-   - booster/shop controls;
-   - spin control.
-3. Store visually verified layout profiles.
-4. Apply those coordinate paths to matching games.
-5. For every game, compare clicked request against its declaration.
-6. Invalidate/review any game whose screenshot/layout or request differs from its profile.
-7. Run sharded exhaustive validation.
-8. Merge outputs into the final bet catalog.
-9. Resolve any remaining `REQUIRES_REVIEW`, especially unknown economic actions.
+Workflow:
+
+`.github/workflows/exhaustive-3oaks.yml`
+
+Trigger:
+
+`analysis/exhaustive-trigger.txt`
+
+Current design:
+
+- 12 shards;
+- every target independent;
+- every special mode enabled;
+- `ANALYSIS_RUNTIME_MODE=hybrid`;
+- low per-shard concurrency;
+- merge step always preserves all target results.
+
+Merged artifact:
+
+`3oaks-exhaustive-final`
+
+## Core files
+
+```text
+src/browser-service.js
+src/network-recorder.js
+src/providers/three-oaks.js
+src/providers/three-oaks-runtime.js
+src/visual-profiles.js
+
+scripts/analyze-targets.js
+scripts/merge-exhaustive-results.js
+scripts/run-visual-plan.js
+
+analysis/targets.txt
+analysis/visual-profiles.json
+analysis/visual-plan.json
+
+.github/workflows/analyze-targets.yml
+.github/workflows/exhaustive-3oaks.yml
+.github/workflows/visual-plan.yml
+
+tools/analysis_gui.py
+```
+
+Diagnostic scripts under `scripts/` preserve investigation history but are not part of the default execution path.
+
+## Read order in a new chat
+
+1. this file;
+2. `docs/ARCHITECTURE.md`;
+3. `docs/VALIDATION_POLICY.md`;
+4. `docs/3OAKS_IMPLEMENTATION.md`;
+5. `docs/OPERATIONS.md`;
+6. inspect the current PR head;
+7. inspect the latest Actions artifacts.
+
+Do not restart the provider investigation from scratch.
 
 ## Definition of done
 
-Do not call the 3 Oaks phase complete merely because `start` was parsed.
+Catalog done:
 
-Done means:
+- all targets present;
+- normal bets complete;
+- all declared buys present;
+- all boosters present;
+- structurally unexplained actions isolated;
+- no target silently dropped.
 
-- normal bets for every target are cataloged;
-- all buy modes are cataloged;
-- all boosters/ante bets are cataloged;
-- unexplained actions are resolved or explicitly isolated;
-- real UI→request mappings are validated for every special mode/layout;
-- final merged report contains all target URLs;
-- no target silently disappears because a runtime attempt failed.
-
-## Commands / outputs
-
-Normal analysis:
-
-```powershell
-npm run analyze:targets
-```
-
-Main output directory:
-
-`artifacts/analysis/`
-
-Expected artifacts include:
-
-- `analysis-report.json`
-- `analysis-report.md`
-- `bet-catalog.json`
-- `bet-catalog.csv`
-- `protocol-blueprints.json`
-- review/retry target lists
-
-The exhaustive workflow produces a merged final artifact.
-
-## Safety against context loss
-
-At the beginning of a future chat:
-
-1. read this file;
-2. read `docs/ARCHITECTURE.md`;
-3. read `docs/VALIDATION_POLICY.md`;
-4. inspect the current PR head and latest Actions artifacts;
-5. continue from the remaining incomplete targets, not from scratch.
+Runtime done is stricter and requires a proof status for every special mode. Keep catalog completeness and runtime completeness separate in all reports.
