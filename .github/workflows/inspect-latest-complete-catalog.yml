@@ -1,0 +1,32 @@
+name: Inspect latest complete catalog
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Wait and fetch latest Analyze targets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          RUN_ID="$(gh run list --repo "$REPO" --workflow analyze-targets.yml --branch "$BRANCH" --event push --limit 5 --json databaseId,status,headSha,createdAt --jq '.[0].databaseId')"
+          echo "Run: $RUN_ID"
+          gh run watch "$RUN_ID" --repo "$REPO" --exit-status
+          mkdir -p result
+          gh run download "$RUN_ID" --repo "$REPO" --name play-ci-analysis --dir result
+          gh run view "$RUN_ID" --repo "$REPO" --json databaseId,headSha,conclusion,createdAt,updatedAt > result/run.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: latest-complete-catalog
+          path: result/
+          retention-days: 1
