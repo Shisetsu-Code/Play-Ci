@@ -23,9 +23,13 @@ The provider protocol explicitly declares the option.
 
 The option has been located in a screenshot and mapped to a real visible control.
 
+### VALIDATED_VISUAL
+
+A real viewport click produced the expected request and the server accepted it.
+
 ### VALIDATED_NATIVE
 
-A real browser/UI action produced the expected request and the server accepted it.
+A known loaded-client method emitted the expected real request and the server accepted it.
 
 ### VALIDATED_REQUEST_RECOGNIZED
 
@@ -54,9 +58,9 @@ Special modes are stricter:
 - mode IDs must not be inferred from zero-based UI indexes unless captured request evidence proves that mapping;
 - a failed hook cannot negate a declaration.
 
-## Visual-first runtime proof
+## Strongest runtime proof: visible click
 
-When validating an economic action:
+When validating an economic action visually:
 
 1. capture screenshot;
 2. identify visible control;
@@ -119,3 +123,20 @@ Runtime evidence is deliberately tiered so transport proof is not confused with 
 - `VALIDATED_REQUEST_RECOGNIZED` / `VALIDATED_REPLAY_RECOGNIZED`: the expected declared request was emitted/accepted at the transport layer but the demo backend could not execute it (for example `FUNDS_EXCEED` or a provider runtime error).
 
 The catalog remains complete from `start` declarations even when GitHub-hosted Chromium cannot render a provider UI. Runtime evidence augments discovery; it never deletes a declared mode.
+
+
+## Catalog completeness versus runtime completeness
+
+These are separate metrics.
+
+Catalog completeness answers: **do we know every wagering option and its parameters?**
+
+Runtime completeness answers: **did every special mode receive accepted/recognized runtime proof?**
+
+For 3 Oaks, `start` is sufficiently descriptive to make a game catalog-complete even when GitHub-hosted Chromium cannot render a particular client. Runtime proof is still tracked per mode and must never overwrite or delete the declaration.
+
+## Replay fallback
+
+Fresh-session replay is permitted only after the mode has already been declared by the real provider bootstrap. It is used to verify that the declared request semantics are accepted by the same demo endpoint when UI rendering or client hooks are unreliable.
+
+Replay statuses must remain visibly different from `VALIDATED_VISUAL`; replay does not prove that a visible control was reachable.
