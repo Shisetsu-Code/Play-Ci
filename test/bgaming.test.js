@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   extractBgamingBootstrap,
+  extractBgamingJsonRpcInit,
   summarizeBgamingBootstrap,
+  summarizeBgamingJsonRpcInit,
   bgamingNeedsReview,
   buildBgamingExecutionBlueprints,
   bgamingCatalog,
@@ -104,4 +106,38 @@ test('marks unknown BGaming bootstrap without bets for review', () => {
     request:null,
   });
   assert.equal(bgamingNeedsReview(p),true);
+});
+
+
+test('summarizes BGaming JSONRPC bet limits', () => {
+  const events=[
+    {
+      seq:1,type:'request',requestId:'j1',method:'POST',
+      url:'https://game.demo.bgaming-network.com/api/',
+      postData:JSON.stringify({jsonrpc:'2.0',method:'init',id:'1',params:{token:'t'}}),
+    },
+    {
+      seq:2,type:'responsebody',requestId:'j1',url:'https://game.demo.bgaming-network.com/api/',
+      body:JSON.stringify({
+        id:'1',jsonrpc:'2.0',result:{
+          currency:'FUN',
+          currency_attributes:{code:'FUN',subunits:100,exponent:2},
+          config:{
+            bet_limits:[10,20,100,6500],
+            default_bet:100,
+            purchased_features:[],
+          },
+          balance:100000,
+        }
+      }),
+    },
+  ];
+
+  const start=extractBgamingJsonRpcInit(events);
+  assert.ok(start);
+  const p=summarizeBgamingJsonRpcInit(start);
+  assert.equal(p.generation,'jsonrpc');
+  assert.deepEqual(p.display_bets,[0.1,0.2,1,65]);
+  assert.equal(p.default_bet_display,1);
+  assert.equal(bgamingNeedsReview(p),false);
 });
