@@ -25,7 +25,7 @@ jobs:
       TARGET_FILE: /tmp/shard-targets.txt
       ANALYSIS_OUTPUT_DIR: artifacts/exhaustive
       ANALYSIS_RUNTIME_VALIDATION: '1'
-      ANALYSIS_RUNTIME_MODE: 'visual'
+      ANALYSIS_RUNTIME_MODE: 'hybrid'
       ANALYSIS_VISUAL_CAPTURE_EVIDENCE: '1'
       ANALYSIS_VALIDATE_ALL_MODES: '1'
       ANALYSIS_VALIDATE_EVERY_TARGET: '1'
