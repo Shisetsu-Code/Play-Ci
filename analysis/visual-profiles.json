@@ -1,0 +1,250 @@
+{
+  "version": 1,
+  "viewport": {
+    "width": 1280,
+    "height": 720,
+    "deviceScaleFactor": 1
+  },
+  "profiles": [
+    {
+      "id": "goreel-buy2",
+      "provider": "3oaks",
+      "client_family": "goreel",
+      "buy_count": 2,
+      "booster_count": 0,
+      "representative_game": "3_aztec_temples",
+      "status": "VISUALLY_MAPPED",
+      "waits": {
+        "initial_ms": 3500,
+        "after_dismiss_ms": 1800,
+        "after_open_ms": 1000,
+        "after_option_ms": 1400
+      },
+      "dismiss": {
+        "x": 640,
+        "y": 670
+      },
+      "open_economic": {
+        "x": 150,
+        "y": 195
+      },
+      "buy_options": [
+        {
+          "ordinal": 0,
+          "x": 510,
+          "y": 458
+        },
+        {
+          "ordinal": 1,
+          "x": 760,
+          "y": 458
+        }
+      ],
+      "boosters": [],
+      "spin": {
+        "x": 1195,
+        "y": 350
+      },
+      "bet_minus": {
+        "x": 800,
+        "y": 686
+      },
+      "bet_plus": {
+        "x": 1048,
+        "y": 686
+      },
+      "visual_evidence": {
+        "run_id": 36203407206,
+        "jobs": [
+          "goreel-buy-1",
+          "goreel-buy-2"
+        ]
+      },
+      "validated": true
+    },
+    {
+      "id": "enjoy-buy2",
+      "provider": "3oaks",
+      "client_family": "enjoy",
+      "buy_count": 2,
+      "booster_count": 0,
+      "representative_game": "3_superpower_diamonds",
+      "status": "VISUALLY_MAPPED",
+      "waits": {
+        "initial_ms": 3500,
+        "after_dismiss_ms": 1800,
+        "after_open_ms": 1000,
+        "after_option_ms": 1400
+      },
+      "dismiss": {
+        "x": 640,
+        "y": 670
+      },
+      "open_economic": {
+        "x": 1195,
+        "y": 233
+      },
+      "buy_options": [
+        {
+          "ordinal": 0,
+          "x": 488,
+          "y": 475
+        },
+        {
+          "ordinal": 1,
+          "x": 792,
+          "y": 475
+        }
+      ],
+      "boosters": [],
+      "spin": {
+        "x": 1195,
+        "y": 350
+      },
+      "bet_minus": {
+        "x": 800,
+        "y": 685
+      },
+      "bet_plus": {
+        "x": 1048,
+        "y": 685
+      },
+      "visual_evidence": {
+        "run_id": 36203407206,
+        "jobs": [
+          "enjoy-buy-1",
+          "enjoy-buy-2"
+        ]
+      },
+      "validated": true
+    },
+    {
+      "id": "hraymo-buy2",
+      "provider": "3oaks",
+      "client_family": "hraymo",
+      "buy_count": 2,
+      "booster_count": 0,
+      "representative_game": "3_african_drums",
+      "status": "VISUALLY_MAPPED",
+      "waits": {
+        "initial_ms": 4000,
+        "after_dismiss_ms": 2500,
+        "after_open_ms": 1000,
+        "after_option_ms": 1400
+      },
+      "dismiss": {
+        "x": 640,
+        "y": 360
+      },
+      "open_economic": {
+        "x": 135,
+        "y": 258
+      },
+      "buy_options": [
+        {
+          "ordinal": 0,
+          "x": 460,
+          "y": 425
+        },
+        {
+          "ordinal": 1,
+          "x": 820,
+          "y": 425
+        }
+      ],
+      "boosters": [],
+      "spin": {
+        "x": 1195,
+        "y": 350
+      },
+      "bet_minus": {
+        "x": 800,
+        "y": 685
+      },
+      "bet_plus": {
+        "x": 1048,
+        "y": 685
+      },
+      "visual_evidence": {
+        "run_id": 36203407206,
+        "jobs": [
+          "hraymo-map-buy"
+        ]
+      },
+      "validated": false
+    },
+    {
+      "id": "ratpack-buy2-boost3",
+      "provider": "3oaks",
+      "client_family": "ratpack",
+      "buy_count": 2,
+      "booster_count": 3,
+      "representative_game": "4_super_clover_pots",
+      "status": "VISUALLY_MAPPED",
+      "waits": {
+        "initial_ms": 6500,
+        "after_dismiss_ms": 3000,
+        "after_open_ms": 1000,
+        "after_option_ms": 1400,
+        "after_booster_select_ms": 1000,
+        "after_spin_ms": 1800
+      },
+      "dismiss": {
+        "x": 640,
+        "y": 360
+      },
+      "open_economic": {
+        "x": 1195,
+        "y": 233
+      },
+      "buy_options": [
+        {
+          "ordinal": 0,
+          "x": 240,
+          "y": 515
+        },
+        {
+          "ordinal": 1,
+          "x": 462,
+          "y": 515
+        }
+      ],
+      "boosters": [
+        {
+          "ordinal": 0,
+          "x": 716,
+          "y": 486
+        },
+        {
+          "ordinal": 1,
+          "x": 884,
+          "y": 486
+        },
+        {
+          "ordinal": 2,
+          "x": 1052,
+          "y": 486
+        }
+      ],
+      "spin": {
+        "x": 1195,
+        "y": 350
+      },
+      "bet_minus": {
+        "x": 500,
+        "y": 592
+      },
+      "bet_plus": {
+        "x": 775,
+        "y": 592
+      },
+      "visual_evidence": {
+        "run_id": 36203407206,
+        "jobs": [
+          "ratpack-map-buy"
+        ]
+      },
+      "validated": false
+    }
+  ]
+}
