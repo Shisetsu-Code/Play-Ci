@@ -68,6 +68,7 @@ const catalog = targets.map((target) => {
 
   const runtimeAcceptedStatuses = new Set([
     'VALIDATED_NATIVE',
+    'VALIDATED_VISUAL',
     'VALIDATED_REQUEST_RECOGNIZED',
   ]);
   const attemptedFeatures = featureValidation.filter((f) => f.runtime_status !== 'NOT_ATTEMPTED');
