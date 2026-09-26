@@ -249,7 +249,7 @@ export function buildBgamingExecutionBlueprints(protocol) {
       purchased_feature:feature.feature,
     };
     if (feature.level != null) {
-      options.purchased_feature_level:'<LEVEL_MAPPING_REQUIRED>';
+      options.purchased_feature_level = '<LEVEL_MAPPING_REQUIRED>'; 
     }
     out.push({
       kind:feature.kind,
