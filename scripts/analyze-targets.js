@@ -17,7 +17,9 @@ import {
 } from '../src/providers/three-oaks.js';
 import {
   extractBgamingBootstrap,
+  extractBgamingJsonRpcInit,
   summarizeBgamingBootstrap,
+  summarizeBgamingJsonRpcInit,
   bgamingNeedsReview,
   bgamingReviewReasons,
   buildBgamingExecutionBlueprints,
@@ -210,16 +212,22 @@ async function discover(service, url) {
     }
 
     let bgStart = extractBgamingBootstrap(events);
-    if (!bgStart && /bgaming-network\.com/i.test(url)) {
-      const deadline = Date.now() + 8000;
-      while (!bgStart && Date.now() < deadline) {
+    let bgJsonRpc = extractBgamingJsonRpcInit(events);
+    if (!bgStart && !bgJsonRpc && /bgaming-network\.com/i.test(url)) {
+      const deadline = Date.now() + 10000;
+      while (!bgStart && !bgJsonRpc && Date.now() < deadline) {
         await sleep(200);
-        bgStart = extractBgamingBootstrap(internal.recorder.eventsAfter(0));
+        const currentEvents = internal.recorder.eventsAfter(0);
+        bgStart = extractBgamingBootstrap(currentEvents);
+        bgJsonRpc = extractBgamingJsonRpcInit(currentEvents);
       }
     }
 
-    if (bgStart) {
-      const protocol = summarizeBgamingBootstrap(bgStart);
+    if (bgStart || bgJsonRpc) {
+      const source = bgStart || bgJsonRpc;
+      const protocol = bgStart
+        ? summarizeBgamingBootstrap(bgStart)
+        : summarizeBgamingJsonRpcInit(bgJsonRpc);
       const reviewReasons = bgamingReviewReasons(protocol);
       return {
         ok: true,
@@ -232,7 +240,7 @@ async function discover(service, url) {
         review_reasons: reviewReasons,
         declared_features: bgamingDeclaredFeatures(protocol),
         execution_blueprints: buildBgamingExecutionBlueprints(protocol),
-        bootstrap_endpoint: bgStart.request?.url || null,
+        bootstrap_endpoint: source.request?.url || null,
       };
     }
 
