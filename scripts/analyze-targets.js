@@ -18,6 +18,7 @@ import {
 import {
   extractBgamingBootstrap,
   extractBgamingJsonRpcInit,
+  extractBgamingUnrecognizedInit,
   summarizeBgamingBootstrap,
   summarizeBgamingJsonRpcInit,
   bgamingNeedsReview,
@@ -278,6 +279,31 @@ async function discover(service, url) {
       };
     }
 
+
+    if (/bgaming-network\.com/i.test(url)) {
+      const finalEvents = internal.recorder.eventsAfter(0);
+      const unrecognizedInit = extractBgamingUnrecognizedInit(finalEvents);
+      return {
+        ok: true,
+        url,
+        provider: 'bgaming',
+        client_family: 'bgaming-unknown',
+        status: 'REQUIRES_REVIEW',
+        duration_ms: Date.now() - started,
+        protocol: null,
+        review_reasons: [unrecognizedInit
+          ? {
+              code:'UNSUPPORTED_BGAMING_INIT_SCHEMA',
+              response_keys:Object.keys(unrecognizedInit.body || {}),
+            }
+          : {code:'BGAMING_BOOTSTRAP_MISSING'}],
+        observed_json: summarizeGeneric(finalEvents),
+        declared_features: [],
+        execution_blueprints: [],
+        bootstrap_endpoint: unrecognizedInit?.request?.url || null,
+      };
+    }
+
     return {
       ok: true,
       url,
@@ -285,7 +311,7 @@ async function discover(service, url) {
       client_family: 'unknown',
       status: 'REQUIRES_REVIEW',
       duration_ms: Date.now() - started,
-      observed_json: summarizeGeneric(events),
+      observed_json: summarizeGeneric(internal.recorder.eventsAfter(0)),
       declared_features: [],
     };
   } finally {
@@ -1736,10 +1762,12 @@ try {
   );
 
   const blueprintCatalog = targets
-    .filter((target) => target.provider === '3oaks')
+    .filter((target) => ['3oaks','bgaming'].includes(target.provider))
     .map((target) => ({
       url: target.url,
+      provider: target.provider,
       client_family: target.client_family,
+      generation: target.protocol?.generation ?? null,
       status: target.status,
       review_reasons: target.review_reasons || [],
       protocol: target.protocol,

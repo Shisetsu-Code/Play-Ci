@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   extractBgamingBootstrap,
   extractBgamingJsonRpcInit,
+  extractBgamingUnrecognizedInit,
   summarizeBgamingBootstrap,
   summarizeBgamingJsonRpcInit,
   bgamingNeedsReview,
@@ -186,4 +187,60 @@ test('JSONRPC purchased_features remain unresolved capabilities, not wager modes
   assert.deepEqual(p.special_modes,[]);
   assert.deepEqual(p.purchased_feature_capabilities,['buy_bonus','bonus_buy','freespin_chance']);
   assert.equal(bgamingNeedsReview(p),true);
+});
+
+
+test('legacy BGaming blueprints use observed bets map and buy_feature wire shape', () => {
+  const p=summarizeBgamingBootstrap({
+    body:{
+      options:{
+        line_bets:[1,2,10],
+        default_bet:1,
+        lines:Array.from({length:10},()=>[0,0,0]),
+        currency:{code:'FUN',subunits:100,exponent:2},
+        buy_feature_value:97,
+      },
+      game:{state:'idle'},
+      available_commands:['init','spin'],
+    },
+    request:null,
+  });
+  const blueprints=buildBgamingExecutionBlueprints(p);
+  assert.deepEqual(blueprints[0].request_template.options,{bets:'<LINE_BETS_MAP>'});
+  assert.equal(blueprints[0].request_template.extra_data.round_series_id,'<ROUND_SERIES_ID>');
+  assert.equal(blueprints[1].request_template.options.buy_feature,true);
+  assert.equal(blueprints[1].request_template.options.purchased_feature,undefined);
+});
+
+test('JSONRPC blueprint does not invent an unobserved spin body', () => {
+  const p=summarizeBgamingJsonRpcInit({
+    body:{jsonrpc:'2.0',result:{
+      currency_attributes:{code:'FUN',subunits:100},
+      config:{bet_limits:[20,100],default_bet:100,purchased_features:[]},
+    }},
+    request:null,
+  });
+  const blueprints=buildBgamingExecutionBlueprints(p);
+  assert.equal(blueprints.length,1);
+  assert.equal(blueprints[0].wire_protocol,'jsonrpc-2.0');
+  assert.equal(blueprints[0].request_template,null);
+  assert.equal(blueprints[0].unresolved_reason,'JSONRPC_SPIN_WIRE_UNMAPPED');
+});
+
+test('detects BGaming init responses whose schema is not mapped yet', () => {
+  const events=[
+    {
+      seq:1,type:'request',requestId:'u1',method:'POST',
+      url:'https://demo.bgaming-network.com/api/OldGame/1/session',
+      postData:JSON.stringify({command:'init',extra_data:{round_series_id:1}}),
+    },
+    {
+      seq:2,type:'responsebody',requestId:'u1',
+      url:'https://demo.bgaming-network.com/api/OldGame/1/session',
+      body:JSON.stringify({wallet:100000,game:0}),
+    },
+  ];
+  const start=extractBgamingUnrecognizedInit(events);
+  assert.ok(start);
+  assert.deepEqual(start.body,{wallet:100000,game:0});
 });

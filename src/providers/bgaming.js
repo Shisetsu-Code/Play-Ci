@@ -83,6 +83,36 @@ export function extractBgamingBootstrap(events) {
   return candidates[0] || null;
 }
 
+
+export function extractBgamingUnrecognizedInit(events) {
+  const candidates = [];
+  for (const event of events) {
+    const body = jsonBody(event);
+    if (!body || typeof body !== 'object' || isMainBootstrap(body)) continue;
+
+    const request = requestFor(events, event);
+    const requestBody = parseRequestBody(request);
+    const url = request?.url || event.url || '';
+    if (requestBody?.command !== 'init') continue;
+    if (!/bgaming-network\.com\/api\//i.test(url)) continue;
+
+    candidates.push({
+      body,
+      request: request ? {
+        method: request.method,
+        url: request.url,
+        headers: request.headers || {},
+        postData: request.postData ?? null,
+      } : null,
+      command: 'init',
+      score: Object.keys(body).length,
+    });
+  }
+
+  candidates.sort((x, y) => y.score - x.score);
+  return candidates[0] || null;
+}
+
 function finiteNumbers(value) {
   if (!Array.isArray(value)) return [];
   return value.map(Number).filter(Number.isFinite);
@@ -321,37 +351,83 @@ export function bgamingNeedsReview(protocol) {
 }
 
 export function buildBgamingExecutionBlueprints(protocol) {
+  const generation = protocol?.generation || 'unknown';
+
+  if (generation === 'jsonrpc') {
+    return [{
+      kind:'spin',
+      id:'spin',
+      evidence:'server_init',
+      confidence:'method_declared_wire_unmapped',
+      wire_protocol:'jsonrpc-2.0',
+      request_template:null,
+      unresolved_reason:'JSONRPC_SPIN_WIRE_UNMAPPED',
+    }];
+  }
+
+  const legacy = generation === 'legacy';
+  const baseOptions = legacy
+    ? {bets:'<LINE_BETS_MAP>'}
+    : {bet:'<BET>'};
+  const baseTemplate = {
+    command:'spin',
+    options:{...baseOptions},
+  };
+  if (legacy) {
+    baseTemplate.extra_data = {round_series_id:'<ROUND_SERIES_ID>'};
+  }
+
   const out = [{
     kind:'spin',
     id:'spin',
-    evidence:'server_init',
-    confidence:'declared',
-    request_template:{
-      command:'spin',
-      options:{bet:'<BET>'},
-    },
+    evidence:legacy ? 'server_init+visible_wire_sample' : 'server_init',
+    confidence:legacy ? 'family_validated' : 'declared',
+    request_template:baseTemplate,
   }];
 
   for (const feature of protocol?.special_modes || []) {
-    const options = {
-      bet:'<BET>',
-      purchased_feature:feature.feature,
-    };
-    if (feature.level != null) {
+    if (legacy && feature.feature !== 'buy_feature') {
+      out.push({
+        kind:feature.kind,
+        id:`${feature.feature}:${feature.level ?? 'fixed'}`,
+        feature:feature.feature,
+        declared_level:feature.level,
+        declared_multiplier:feature.multiplier,
+        evidence:'server_init',
+        confidence:'declared_wire_unmapped',
+        request_template:null,
+        unresolved_reason:'LEGACY_FEATURE_WIRE_UNMAPPED',
+      });
+      continue;
+    }
+
+    const options = legacy
+      ? {...baseOptions, buy_feature:true}
+      : {
+          bet:'<BET>',
+          purchased_feature:feature.feature,
+        };
+    if (!legacy && feature.level != null) {
       options.purchased_feature_level = String(feature.level);
     }
+
+    const requestTemplate = {
+      command:'spin',
+      options,
+    };
+    if (legacy) {
+      requestTemplate.extra_data = {round_series_id:'<ROUND_SERIES_ID>'};
+    }
+
     out.push({
       kind:feature.kind,
       id:`${feature.feature}:${feature.level ?? 'fixed'}`,
       feature:feature.feature,
       declared_level:feature.level,
       declared_multiplier:feature.multiplier,
-      evidence:'server_init',
-      confidence:'declared',
-      request_template:{
-        command:'spin',
-        options,
-      },
+      evidence:legacy ? 'server_init+visible_wire_sample' : 'server_init',
+      confidence:legacy ? 'family_validated' : 'declared',
+      request_template:requestTemplate,
     });
   }
   return out;
