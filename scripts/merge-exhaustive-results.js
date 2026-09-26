@@ -129,7 +129,7 @@ const summary = {
   declared_features: targets.reduce((sum, t) => sum + (t.declared_features || []).length, 0),
   runtime_validations: validations.length,
   runtime_validated: validations.filter((v) =>
-    ['VALIDATED_NATIVE', 'VALIDATED_REQUEST_RECOGNIZED'].includes(v.status)
+    ['VALIDATED_NATIVE', 'VALIDATED_VISUAL', 'VALIDATED_REQUEST_RECOGNIZED'].includes(v.status)
   ).length,
   runtime_status_counts: statusCounts,
   catalog_complete: catalog.filter((c) => c.catalog_status === 'COMPLETE').length,
