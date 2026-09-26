@@ -1507,6 +1507,7 @@ try {
     'VISUAL_PROFILE_MISSING',
     'VISUAL_PROFILE_INCOMPLETE',
     'VISUAL_NO_REQUEST',
+    'PROTOCOL_REPLAY_START_MISSING',
   ]);
 
   const catalog = buildBetCatalog(targets);
@@ -1552,7 +1553,9 @@ try {
       ).length,
       runtime_unavailable: validations.filter((entry) => runtimeUnavailableStatuses.has(entry?.status)).length,
       runtime_deferred: validations.filter((entry) => entry?.status === 'DEFERRED_PROVIDER_BLOCK').length,
-      runtime_rejected: validations.filter((entry) => entry?.status === 'NATIVE_REJECTED').length,
+      runtime_rejected: validations.filter((entry) =>
+        ['NATIVE_REJECTED', 'PROTOCOL_REPLAY_REJECTED'].includes(entry?.status)
+      ).length,
       validation_signatures: groups.length,
       runtime_covered_targets: new Set(validations.flatMap((entry) => entry?.covers_urls || [])).size,
       catalog_complete: catalog.filter((entry) => entry.catalog_status === 'COMPLETE').length,
