@@ -4,9 +4,9 @@ import { config } from '../src/config.js';
 import { BrowserService } from '../src/browser-service.js';
 
 const targets=[
- ['SugarMix','https://demo.bgaming-network.com/play/SugarMix/FUN'],
- ['YommiRush','https://demo.bgaming-network.com/play/YommiRush/FUN'],
- ['AztecsClawWildDice','https://demo.bgaming-network.com/play/AztecsClawWildDice/FUN'],
+ ['SugarMix','https://demo.bgaming-network.com/play/SugarMix/FUN',[640,650]],
+ ['YommiRush','https://demo.bgaming-network.com/play/YommiRush/FUN',[1140,650]],
+ ['AztecsClawWildDice','https://demo.bgaming-network.com/play/AztecsClawWildDice/FUN',[640,640]],
 ];
 const service=new BrowserService(config);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -14,7 +14,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 await service.start();
 try{
  const manifest=[];
- for(const [game,url] of targets){
+ for(const [game,url,startClick] of targets){
   const s=await service.createSession({url,skipSplash:false,captureInitialScreenshot:false});
   const internal=service.sessions.get(s.id);
   const dir=path.join('artifacts','bg-jsonrpc-ui',game); await fs.mkdir(dir,{recursive:true});
@@ -22,6 +22,10 @@ try{
    await sleep(8000);
    const shot=await service.capture(s.id,'ready');
    await fs.copyFile(path.resolve(shot.path),path.join(dir,'ready.png'));
+   await internal.page.mouse.click(startClick[0],startClick[1]);
+   await sleep(2500);
+   const gameShot=await service.capture(s.id,'game');
+   await fs.copyFile(path.resolve(gameShot.path),path.join(dir,'game.png'));
    const state=await internal.page.evaluate(()=>({
      readyState:document.readyState,
      title:document.title,
