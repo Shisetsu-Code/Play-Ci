@@ -212,7 +212,7 @@ test('legacy BGaming blueprints use observed bets map and buy_feature wire shape
   assert.equal(blueprints[1].request_template.options.purchased_feature,undefined);
 });
 
-test('JSONRPC blueprint does not invent an unobserved spin body', () => {
+test('JSONRPC base-spin blueprint uses the visible-click play wire shape', () => {
   const p=summarizeBgamingJsonRpcInit({
     body:{jsonrpc:'2.0',result:{
       currency_attributes:{code:'FUN',subunits:100},
@@ -223,8 +223,9 @@ test('JSONRPC blueprint does not invent an unobserved spin body', () => {
   const blueprints=buildBgamingExecutionBlueprints(p);
   assert.equal(blueprints.length,1);
   assert.equal(blueprints[0].wire_protocol,'jsonrpc-2.0');
-  assert.equal(blueprints[0].request_template,null);
-  assert.equal(blueprints[0].unresolved_reason,'JSONRPC_SPIN_WIRE_UNMAPPED');
+  assert.equal(blueprints[0].request_template.method,'play');
+  assert.equal(blueprints[0].request_template.params.req.bet,'<BET_SUBUNITS>');
+  assert.equal(blueprints[0].request_template.params.req.bet_type,'bet');
 });
 
 test('detects BGaming init responses whose schema is not mapped yet', () => {

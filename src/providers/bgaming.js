@@ -357,11 +357,21 @@ export function buildBgamingExecutionBlueprints(protocol) {
     return [{
       kind:'spin',
       id:'spin',
-      evidence:'server_init',
-      confidence:'method_declared_wire_unmapped',
+      evidence:'visible_wire_sample',
+      confidence:'family_validated',
       wire_protocol:'jsonrpc-2.0',
-      request_template:null,
-      unresolved_reason:'JSONRPC_SPIN_WIRE_UNMAPPED',
+      request_template:{
+        jsonrpc:'2.0',
+        method:'play',
+        id:'<REQUEST_ID>',
+        params:{
+          token:'<SESSION_TOKEN>',
+          req:{
+            bet:'<BET_SUBUNITS>',
+            bet_type:'bet',
+          },
+        },
+      },
     }];
   }
 
