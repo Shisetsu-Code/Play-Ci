@@ -48,7 +48,7 @@ async function runCase(name, clicks){
 await service.start();
 try{
   const spin=await runCase('spin',[[ 'spin-click',1128,680,1800 ]]);
-  const buy=await runCase('buy',[[ 'buy-open',338,45,1200 ]]);
+  const buy=await runCase('buy',[[ 'buy-open',338,45,900 ],[ 'buy-confirm',750,448,1800 ]]);
   const report={spin,buy};
   await fs.writeFile('artifacts/bg-legacy-clicks/report.json',JSON.stringify(report,null,2),'utf8');
   console.log(JSON.stringify({
