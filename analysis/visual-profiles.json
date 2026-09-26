@@ -166,12 +166,13 @@
         "y": 685
       },
       "visual_evidence": {
-        "run_id": 36203407206,
+        "run_id": 36204013907,
         "jobs": [
-          "hraymo-map-buy"
+          "hraymo-buy-1",
+          "hraymo-buy-2"
         ]
       },
-      "validated": false
+      "validated": true
     },
     {
       "id": "ratpack-buy2-boost3",
@@ -239,12 +240,16 @@
         "y": 592
       },
       "visual_evidence": {
-        "run_id": 36203407206,
+        "run_id": 36204013907,
         "jobs": [
-          "ratpack-map-buy"
+          "ratpack-buy-1",
+          "ratpack-buy-2",
+          "ratpack-booster-1",
+          "ratpack-booster-2",
+          "ratpack-booster-3"
         ]
       },
-      "validated": false
+      "validated": true
     }
   ]
 }
