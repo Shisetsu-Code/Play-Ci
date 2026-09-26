@@ -26,7 +26,7 @@ new screenshot
 repeat until every declared/visible option has been reconciled
 ```
 
-Protocol inspection is an accelerator and completeness oracle. It is not a substitute for a real UI action when a feature is marked runtime-validated.
+Protocol inspection is the catalog-completeness oracle. Runtime evidence is a separate confidence layer. A real UI click is the strongest proof, but native-client and fresh-session replay evidence are retained as explicitly weaker proof tiers when a renderer cannot expose the control reliably.
 
 ## Evidence hierarchy
 
@@ -62,20 +62,19 @@ first visible purchase card → (…)
 
 This layer says what the user actually sees.
 
-### 3. VALIDATED
+### 3. RUNTIME PROOF
 
-Playwright clicked the visible UI and the resulting browser request was captured and matched to the declared feature.
+Runtime proof has multiple strengths:
 
-A runtime validation requires:
+- `VALIDATED_VISUAL`: exact viewport click -> captured request -> accepted response.
+- `VALIDATED_NATIVE`: known client method -> captured request -> accepted response.
+- `VALIDATED_PROTOCOL_REPLAY`: provider-declared mode -> fresh browser session -> exact demo endpoint accepts the request.
+- recognized variants record cases where the semantic request is understood but the demo backend cannot complete execution.
 
-1. a real browser session;
-2. a visible UI interaction or an already visually validated layout rule;
-3. a causally captured request after the click;
-4. the expected request semantics;
-5. an accepted/recognized server response.
+For a buy, the expected semantic action is normally `gsc=play` with `action.name = buy_spin`.
+For a booster, it is normally a `spin` carrying the expected `ante_bet` and provider mode.
 
-For a buy, this normally means a real `gsc=play` with `action.name = buy_spin`.
-For a booster, it normally means a real spin containing the expected `ante_bet` and mode.
+Visual proof remains the strongest UI-to-wire evidence; replay proof must never be described as visible-control proof.
 
 ### 4. REQUIRES_REVIEW
 
@@ -201,18 +200,18 @@ Current protections include:
 
 Exhaustive mode should distribute targets across multiple runners and must stop generating traffic if a provider starts blocking.
 
-## Do not use as final proof
+## Proof boundaries
 
-The following are diagnostics only and must not by themselves mark a feature VALIDATED:
+The following do not prove a mode by themselves:
 
-- calling a guessed raw API request;
-- `APIRequestContext` replay;
-- a `TestActions` function existing;
-- an internal hook returning successfully;
-- a protocol field by itself;
-- a screenshot by itself.
+- a `TestActions` method merely existing;
+- an internal hook returning successfully without traffic;
+- a protocol field without preserving its declaration status;
+- a screenshot without matching network evidence.
 
-The strongest proof is:
+A raw/fresh-session replay is allowed only as `VALIDATED_PROTOCOL_REPLAY` / `VALIDATED_REPLAY_RECOGNIZED`. It confirms protocol validity and must remain distinguished from UI reachability.
+
+The strongest proof remains:
 
 ```text
 visible control
@@ -319,3 +318,10 @@ This allows a future ChatGPT conversation to:
 5. verify the exact request caused by the click.
 
 Because the runner replays the entire click history, browser state does not need to survive between GitHub Actions runs.
+
+
+## Current 3 Oaks implementation
+
+For the exact 3 Oaks field normalization rules, legacy/fixed buy handling, client-family findings, visual profiles, exhaustive sharding and historical failures, read `docs/3OAKS_IMPLEMENTATION.md`.
+
+For the operational runbook, read `docs/OPERATIONS.md`.
