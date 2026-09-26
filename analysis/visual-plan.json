@@ -1,4 +1,226 @@
 {
   "version": 1,
-  "jobs": []
+  "jobs": [
+    {
+      "id": "hraymo-map-buy",
+      "url": "https://3oaks.com/api/v1/games/3_african_drums/play?lang=en",
+      "metadata": {
+        "family": "hraymo",
+        "purpose": "open visible buy control"
+      },
+      "steps": [
+        {
+          "type": "wait",
+          "ms": 4000,
+          "label": "loaded"
+        },
+        {
+          "type": "click",
+          "x": 640,
+          "y": 360,
+          "label": "dismiss-start",
+          "waitAfterMs": 2500
+        },
+        {
+          "type": "click",
+          "x": 135,
+          "y": 258,
+          "label": "buy-bonus-button",
+          "waitAfterMs": 1200
+        }
+      ]
+    },
+    {
+      "id": "ratpack-map-buy",
+      "url": "https://3oaks.com/api/v1/games/4_super_clover_pots/play?lang=en",
+      "metadata": {
+        "family": "ratpack",
+        "purpose": "open visible BONUS popup"
+      },
+      "steps": [
+        {
+          "type": "wait",
+          "ms": 6500,
+          "label": "loaded"
+        },
+        {
+          "type": "click",
+          "x": 640,
+          "y": 360,
+          "label": "dismiss-start",
+          "waitAfterMs": 3000
+        },
+        {
+          "type": "click",
+          "x": 1195,
+          "y": 233,
+          "label": "open-bonus",
+          "waitAfterMs": 1200
+        }
+      ]
+    },
+    {
+      "id": "goreel-buy-1",
+      "url": "https://3oaks.com/api/v1/games/3_aztec_temples/play?lang=en",
+      "metadata": {
+        "family": "goreel",
+        "purpose": "validate first visible buy"
+      },
+      "steps": [
+        {
+          "type": "wait",
+          "ms": 3500,
+          "label": "loaded"
+        },
+        {
+          "type": "click",
+          "x": 640,
+          "y": 670,
+          "label": "dismiss-start",
+          "waitAfterMs": 1800
+        },
+        {
+          "type": "click",
+          "x": 150,
+          "y": 195,
+          "label": "open-bonus",
+          "waitAfterMs": 1000
+        },
+        {
+          "type": "click",
+          "x": 510,
+          "y": 458,
+          "label": "buy-option-1",
+          "waitAfterMs": 1200
+        }
+      ]
+    },
+    {
+      "id": "goreel-buy-2",
+      "url": "https://3oaks.com/api/v1/games/3_aztec_temples/play?lang=en",
+      "metadata": {
+        "family": "goreel",
+        "purpose": "validate second visible buy"
+      },
+      "steps": [
+        {
+          "type": "wait",
+          "ms": 3500,
+          "label": "loaded"
+        },
+        {
+          "type": "click",
+          "x": 640,
+          "y": 670,
+          "label": "dismiss-start",
+          "waitAfterMs": 1800
+        },
+        {
+          "type": "click",
+          "x": 150,
+          "y": 195,
+          "label": "open-bonus",
+          "waitAfterMs": 1000
+        },
+        {
+          "type": "click",
+          "x": 760,
+          "y": 458,
+          "label": "buy-option-2",
+          "waitAfterMs": 1200
+        }
+      ]
+    },
+    {
+      "id": "enjoy-buy-1",
+      "url": "https://3oaks.com/api/v1/games/3_superpower_diamonds/play?lang=en",
+      "metadata": {
+        "family": "enjoy",
+        "purpose": "validate first visible buy"
+      },
+      "steps": [
+        {
+          "type": "wait",
+          "ms": 3500,
+          "label": "loaded"
+        },
+        {
+          "type": "click",
+          "x": 640,
+          "y": 670,
+          "label": "dismiss-start",
+          "waitAfterMs": 1800
+        },
+        {
+          "type": "click",
+          "x": 1195,
+          "y": 233,
+          "label": "open-bonus",
+          "waitAfterMs": 1000
+        },
+        {
+          "type": "click",
+          "x": 488,
+          "y": 475,
+          "label": "buy-option-1",
+          "waitAfterMs": 1200
+        }
+      ]
+    },
+    {
+      "id": "enjoy-buy-2",
+      "url": "https://3oaks.com/api/v1/games/3_superpower_diamonds/play?lang=en",
+      "metadata": {
+        "family": "enjoy",
+        "purpose": "validate second visible buy"
+      },
+      "steps": [
+        {
+          "type": "wait",
+          "ms": 3500,
+          "label": "loaded"
+        },
+        {
+          "type": "click",
+          "x": 640,
+          "y": 670,
+          "label": "dismiss-start",
+          "waitAfterMs": 1800
+        },
+        {
+          "type": "click",
+          "x": 1195,
+          "y": 233,
+          "label": "open-bonus",
+          "waitAfterMs": 1000
+        },
+        {
+          "type": "click",
+          "x": 792,
+          "y": 475,
+          "label": "buy-option-2",
+          "waitAfterMs": 1200
+        }
+      ]
+    },
+    {
+      "id": "kendoo-long-wait",
+      "url": "https://3oaks.com/api/v1/games/3_coin_volcanoes/play?lang=en",
+      "metadata": {
+        "family": "kendoo",
+        "purpose": "determine whether GH runner eventually renders UI"
+      },
+      "steps": [
+        {
+          "type": "wait",
+          "ms": 25000,
+          "label": "wait-25s"
+        },
+        {
+          "type": "capture",
+          "label": "after-25s"
+        }
+      ]
+    }
+  ]
 }
