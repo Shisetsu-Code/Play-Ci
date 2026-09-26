@@ -850,6 +850,12 @@ async function validateNativeTask(service, discovery, task) {
 
   try {
     const internal = service.sessions.get(session.id);
+
+    // Some clients do not instantiate their economic/spin controllers until a
+    // real start gesture has dismissed the canvas start screen. Dismiss first,
+    // then wait for the specific capability required by this task.
+    await internal.page.waitForTimeout(500);
+    const startDismissal = await dismissThreeOaksRuntimeStart(internal.page, config.viewport);
     const readiness = await waitForThreeOaksCapability(internal.page, task, {
       timeoutMs: VALIDATION_READY_TIMEOUT_MS,
     });
@@ -865,11 +871,11 @@ async function validateNativeTask(service, discovery, task) {
         declared_multiplier: task.declaredMultiplier ?? 1,
         status: 'DECLARED_CLIENT_NOT_READY',
         duration_ms: Date.now() - started,
+        start_dismissal: startDismissal,
         readiness,
       };
     }
 
-    const startDismissal = await dismissThreeOaksRuntimeStart(internal.page, config.viewport);
     const gameplay = {
       ready: readiness.ready,
       waited_ms: readiness.waitedMs,
