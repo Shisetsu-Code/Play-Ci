@@ -26,6 +26,31 @@ function isMainBootstrap(body) {
   );
 }
 
+export function extractBgamingJsonRpcInit(events) {
+  const candidates = [];
+  for (const event of events) {
+    const body = jsonBody(event);
+    if (body?.jsonrpc !== '2.0' || !body?.result?.config) continue;
+    const request = requestFor(events, event);
+    const requestBody = parseRequestBody(request);
+    if (requestBody?.method !== 'init') continue;
+    if (!Array.isArray(body.result.config.bet_limits)) continue;
+
+    candidates.push({
+      body,
+      request: request ? {
+        method: request.method,
+        url: request.url,
+        headers: request.headers || {},
+        postData: request.postData ?? null,
+      } : null,
+      command: 'init',
+      score: 10,
+    });
+  }
+  return candidates[0] || null;
+}
+
 export function extractBgamingBootstrap(events) {
   const candidates = [];
   for (const event of events) {
@@ -204,6 +229,60 @@ export function summarizeBgamingBootstrap(start) {
     other_features: features.filter((entry) => entry.kind === 'feature'),
     bootstrap_maps: Object.keys(body).filter((key) => /^bet_to_/i.test(key)),
     balance: body.balance ?? null,
+  };
+}
+
+export function summarizeBgamingJsonRpcInit(start) {
+  const result = start?.body?.result || {};
+  const config = result.config || {};
+  const currency = result.currency_attributes || {};
+  const subunits = Number(currency.subunits || (Number.isFinite(Number(currency.exponent)) ? 10 ** Number(currency.exponent) : 100));
+  const rawBets = finiteNumbers(config.bet_limits);
+  const purchased = Array.isArray(config.purchased_features) ? config.purchased_features : [];
+
+  const specialModes = purchased.map((feature) => ({
+    kind: featureKind(feature),
+    feature: String(feature),
+    level: null,
+    raw_value: null,
+    multiplier: null,
+    source: 'result.config.purchased_features',
+  }));
+
+  return {
+    provider: 'bgaming',
+    generation: 'jsonrpc',
+    api_version: 'jsonrpc-2.0',
+    actions: ['init', 'spin'],
+    currency: {
+      code: currency.code ?? result.currency ?? null,
+      symbol: currency.symbol ?? null,
+      subunits: Number.isFinite(subunits) && subunits > 0 ? subunits : 100,
+      exponent: currency.exponent ?? null,
+    },
+    bet_encoding: 'total_bet_subunits',
+    raw_bets: rawBets,
+    display_bets: rawBets.map((bet) => round(bet / subunits)),
+    default_bet_raw: Number.isFinite(Number(config.default_bet)) ? Number(config.default_bet) : null,
+    default_bet_display: Number.isFinite(Number(config.default_bet))
+      ? round(Number(config.default_bet) / subunits)
+      : null,
+    line_count: null,
+    lines: [],
+    layout: null,
+    base_bet_reference: null,
+    disabled_features: [],
+    special_modes: specialModes,
+    buy_modes: specialModes.filter((entry) => entry.kind === 'buy'),
+    boosters: specialModes.filter((entry) => entry.kind === 'booster'),
+    other_features: specialModes.filter((entry) => entry.kind === 'feature'),
+    bootstrap_maps: [],
+    balance: result.balance ?? null,
+    jsonrpc: {
+      state_lock: result.state_lock ?? null,
+      rtp: config.rtp ?? null,
+      displayed_rtp: config.displayed_rtp ?? null,
+    },
   };
 }
 
