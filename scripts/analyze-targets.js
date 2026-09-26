@@ -113,6 +113,33 @@ function summarizeGeneric(events) {
   return observed;
 }
 
+function canonicalBgamingUrl(input) {
+  try {
+    const url = new URL(input);
+    if (!/bgaming-network\.com$/i.test(url.hostname)) return null;
+    if (!url.pathname.startsWith('/play/')) return null;
+    url.protocol = 'https:';
+    url.hostname = 'demo.bgaming-network.com';
+    if (!url.searchParams.has('server')) url.searchParams.set('server', 'demo');
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+async function waitForBgamingBootstrap(internal, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let main = null;
+  let rpc = null;
+  while (!main && !rpc && Date.now() < deadline) {
+    const events = internal.recorder.eventsAfter(0);
+    main = extractBgamingBootstrap(events);
+    rpc = extractBgamingJsonRpcInit(events);
+    if (!main && !rpc) await sleep(200);
+  }
+  return {main, rpc};
+}
+
 function detectThreeOaksClientFamily(events) {
   for (const event of events) {
     const url = event?.url || '';
@@ -214,12 +241,19 @@ async function discover(service, url) {
     let bgStart = extractBgamingBootstrap(events);
     let bgJsonRpc = extractBgamingJsonRpcInit(events);
     if (!bgStart && !bgJsonRpc && /bgaming-network\.com/i.test(url)) {
-      const deadline = Date.now() + 10000;
-      while (!bgStart && !bgJsonRpc && Date.now() < deadline) {
-        await sleep(200);
-        const currentEvents = internal.recorder.eventsAfter(0);
-        bgStart = extractBgamingBootstrap(currentEvents);
-        bgJsonRpc = extractBgamingJsonRpcInit(currentEvents);
+      ({main:bgStart, rpc:bgJsonRpc} = await waitForBgamingBootstrap(internal, 10000));
+    }
+
+    if (!bgStart && !bgJsonRpc && /bgaming-network\.com/i.test(url)) {
+      const canonical = canonicalBgamingUrl(url);
+      if (canonical) {
+        try {
+          await internal.page.goto(canonical, {
+            waitUntil: 'domcontentloaded',
+            timeout: config.navigationTimeoutMs,
+          });
+          ({main:bgStart, rpc:bgJsonRpc} = await waitForBgamingBootstrap(internal, 10000));
+        } catch {}
       }
     }
 
