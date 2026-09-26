@@ -3,56 +3,47 @@ import path from 'node:path';
 import { config } from '../src/config.js';
 import { BrowserService } from '../src/browser-service.js';
 
-const url='https://demo.bgaming-network.com/play/SugarMix/FUN';
+const games=[
+  'BigBucksSaloon',
+  'BlackbeardsBounty',
+  'JewelBoom',
+  'StarTrekNextGen',
+  'ZeusGoesWild',
+];
 const service=new BrowserService(config);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
-function compact(events, marker){
-  return events
-    .filter(e=>e.seq>marker && ['request','response','responsebody','requestfailed'].includes(e.type))
-    .map(e=>({
-      seq:e.seq,type:e.type,requestId:e.requestId,url:e.url,method:e.method,status:e.status,
-      postData:e.postData,body:e.body,errorText:e.errorText,
-    }));
-}
-
 await service.start();
 try{
-  const s=await service.createSession({url,skipSplash:false,captureInitialScreenshot:false});
-  const internal=service.sessions.get(s.id);
-  const dir=path.join('artifacts','bg-jsonrpc-ui','SugarMix');
-  await fs.mkdir(dir,{recursive:true});
-  const result={game:'SugarMix',ok:false};
-  try{
-    await sleep(8000);
-    await internal.page.mouse.click(640,650);
-    await sleep(2500);
-    await internal.page.mouse.click(640,615);
-    await sleep(2200);
-    await internal.page.mouse.click(200,390);
-    await sleep(1000);
-
-    const menuShot=await service.capture(s.id,'menu');
-    await fs.copyFile(path.resolve(menuShot.path),path.join(dir,'menu.png'));
-
-    const marker=internal.recorder.marker();
-    await internal.page.mouse.click(640,540);
-    await sleep(1800);
-    await internal.recorder.waitForQuiet({quietMs:600,timeoutMs:5000}).catch(()=>{});
-
-    const afterShot=await service.capture(s.id,'after-buy');
-    await fs.copyFile(path.resolve(afterShot.path),path.join(dir,'after-buy.png'));
-    const events=compact(internal.recorder.eventsAfter(0),marker);
-    await fs.writeFile(path.join(dir,'events.json'),JSON.stringify(events,null,2),'utf8');
-    result.ok=true;
-    result.requests=events.filter(e=>e.type==='request').map(e=>({url:e.url,method:e.method,postData:e.postData}));
-  }catch(error){
-    result.error=error.message;
-  }finally{
-    await service.closeSession(s.id);
+  const manifest=[];
+  for(const game of games){
+    const url=`https://demo.bgaming-network.com/play/${game}/FUN`;
+    const s=await service.createSession({url,skipSplash:false,captureInitialScreenshot:false});
+    const internal=service.sessions.get(s.id);
+    const dir=path.join('artifacts','bg-jsonrpc-ui',game);
+    await fs.mkdir(dir,{recursive:true});
+    try{
+      await sleep(7500);
+      for(const [x,y,wait] of [
+        [640,650,1800],
+        [640,615,1500],
+        [1140,650,1800],
+      ]){
+        await internal.page.mouse.click(x,y);
+        await sleep(wait);
+      }
+      const shot=await service.capture(s.id,'final');
+      await fs.copyFile(path.resolve(shot.path),path.join(dir,'final.png'));
+      manifest.push({game,url,ok:true});
+    }catch(error){
+      manifest.push({game,url,ok:false,error:error.message});
+    }finally{
+      await service.closeSession(s.id);
+      await sleep(250);
+    }
   }
-  await fs.writeFile('artifacts/bg-jsonrpc-ui/manifest.json',JSON.stringify(result,null,2),'utf8');
-  console.log(JSON.stringify(result,null,2));
+  await fs.writeFile('artifacts/bg-jsonrpc-ui/manifest.json',JSON.stringify(manifest,null,2),'utf8');
+  console.log(JSON.stringify(manifest,null,2));
 }finally{
   await service.stop();
 }
