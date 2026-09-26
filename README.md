@@ -1,6 +1,6 @@
 # Play-Ci
 
-Play-Ci is a deterministic Playwright visual/network probe for an external debugger.
+Play-Ci is a deterministic Playwright visual/network probe plus protocol-first analysis pipeline. The generic browser service remains provider-agnostic; provider analyzers such as 3 Oaks add wagering discovery and validation on top.
 
 The intended loop is deliberately simple:
 
@@ -198,7 +198,7 @@ Environment variables:
 
 Authorization, cookies, API keys and similar sensitive headers are redacted in logs by default. POST bodies are captured because they are usually the important protocol evidence, so generated artifacts must still be treated as potentially sensitive.
 
-Play-Ci does not infer bets, buys, bonuses or game semantics. It only performs explicit coordinates supplied by the caller and records what the browser actually sent/received.
+The generic browser probe does not invent game semantics: it opens pages, clicks explicit coordinates and records causally related traffic. Provider analyzers may derive wagering semantics only from captured provider declarations and observed requests, with proof strength recorded separately.
 
 
 ## Analysis queue
