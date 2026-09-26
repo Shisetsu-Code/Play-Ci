@@ -1422,6 +1422,7 @@ function buildBetCatalog(targets) {
         special_modes: bg.special_modes,
         other_features: bg.other_features,
         bootstrap_maps: protocol.bootstrap_maps || [],
+        purchased_feature_capabilities: bg.purchased_feature_capabilities || [],
         catalog_status:
           target.ok && target.status === 'DISCOVERED'
             ? 'COMPLETE'
@@ -1490,6 +1491,7 @@ function buildBetCatalog(targets) {
       special_modes: [],
       other_features: [],
       bootstrap_maps: [],
+      purchased_feature_capabilities: [],
       catalog_status:
         target.provider === '3oaks' && target.ok && target.status === 'DISCOVERED'
           ? 'COMPLETE'
@@ -1526,6 +1528,7 @@ function catalogCsv(catalog) {
     'special_modes',
     'other_features',
     'bootstrap_maps',
+    'purchased_feature_capabilities',
   ];
 
   const rows = [columns.map(csvCell).join(',')];
