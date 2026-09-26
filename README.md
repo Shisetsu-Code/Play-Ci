@@ -214,7 +214,7 @@ The intended ChatGPT workflow is:
 3. ChatGPT reads the current target file, increments `analysis/trigger.txt`, waits for the `Analyze targets` workflow, reads the `play-ci-analysis` artifact and reports the result.
 4. Protocol-first analyzers validate known providers automatically. Unknown protocols are marked `REQUIRES_REVIEW` instead of guessing.
 
-For 3 Oaks, the analyzer first extracts server-declared actions, bets, buy modes, buy prices, boosters and booster prices from `start`. That protocol evidence is the completeness map. Runtime proof is visual-first: capture a screenshot, have GPT/debugger identify the real visible control, click the exact viewport coordinate with Playwright, and correlate the resulting `gsc=play` request/response. Internal hooks are diagnostic aids only and are not sufficient proof by themselves.
+For 3 Oaks, the analyzer first extracts server-declared actions, normal bets, buy modes, buy prices, fixed/legacy buys, boosters and booster prices from `start`. That protocol evidence is the completeness map. Runtime proof is tiered: real visible clicks are strongest, native client methods may be used when they emit the real browser request, and fresh-session protocol replay is an explicitly lower proof tier for clients that cannot be rendered reliably on GitHub runners. A failed runtime path never removes a server-declared mode from the catalog.
 
 Local execution:
 
@@ -261,17 +261,18 @@ It does not require GitHub CLI or a manually configured API token. It uses the r
 The target list accepts up to **1000 URLs** per run. Execution concurrency remains limited, so a large file is processed in controlled parallel batches rather than opening 1000 Chromium contexts at once.
 
 
-### Visual-first validation policy
+### Current validation policy
 
-The authoritative runtime loop is `screenshot → GPT coordinates → Playwright click → captured request/response → new screenshot`. Protocol discovery and runtime execution are separate evidence layers.
+3 Oaks catalog discovery is protocol-first. Runtime proof is separate and tiered.
 
-- 3 Oaks `start` is the authoritative discovery source for actions, buy modes, boosters, prices and bets.
-- Runtime validation is supplemental and uses the browser's native game client, never a raw replay through Playwright `APIRequestContext`.
-- By default only one representative mode per action type/game is executed. All modes remain listed from `start`.
-- Runtime validation runs in batches of 5 games with at most 2 concurrent browser sessions.
-- Two consecutive provider 403/429 responses open a circuit breaker and remaining runtime checks are deferred instead of generating useless traffic.
-- Deferred provider-block targets are written to `artifacts/analysis/retry-targets.txt`.
-- Unknown transitions such as provider-specific actions outside `spin` / `buy_spin` stay `REQUIRES_REVIEW`.
+- `start` is authoritative for the existence and parameters of normal bets, buys and boosters.
+- `VALIDATED_VISUAL` means a real viewport click produced the expected request.
+- `VALIDATED_NATIVE` means a known client method emitted the expected real request.
+- `VALIDATED_PROTOCOL_REPLAY` means a mode declared by `start` was accepted by the same demo endpoint in a fresh browser session; it is transport proof, not UI proof.
+- Normal analysis keeps runtime validation disabled by default.
+- Exhaustive validation is sharded, low-concurrency and uses hybrid runtime proof.
+- Provider 403/429 responses trip a circuit breaker instead of being hammered.
+- A failed runtime attempt never deletes a declared mode.
 
 To force exhaustive runtime execution of every declared mode:
 
@@ -288,5 +289,21 @@ For architecture, validation rules, historical pitfalls and a complete handoff f
 1. `docs/PROJECT_HANDOFF.md`
 2. `docs/ARCHITECTURE.md`
 3. `docs/VALIDATION_POLICY.md`
+4. `docs/3OAKS_IMPLEMENTATION.md`
+5. `docs/OPERATIONS.md`
 
 These documents are the durable source of truth for the project's objective. If an experimental script or old comment conflicts with them, the documents above take precedence.
+
+
+## Current 3 Oaks baseline
+
+The current 110-game target set has a verified catalog-complete baseline:
+
+```text
+Targets: 110
+Catalog complete: 110
+Catalog requires review: 0
+Declared special modes: 126
+```
+
+A verified exhaustive run at that baseline had runtime proof for 71 special modes. Runtime proof and catalog completeness are intentionally separate metrics. See `docs/3OAKS_IMPLEMENTATION.md` for the full history, failure modes and proof hierarchy.
