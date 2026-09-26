@@ -70,6 +70,8 @@ const catalog = targets.map((target) => {
     'VALIDATED_NATIVE',
     'VALIDATED_VISUAL',
     'VALIDATED_REQUEST_RECOGNIZED',
+    'VALIDATED_PROTOCOL_REPLAY',
+    'VALIDATED_REPLAY_RECOGNIZED',
   ]);
   const attemptedFeatures = featureValidation.filter((f) => f.runtime_status !== 'NOT_ATTEMPTED');
   const allAttemptedValidated =
