@@ -395,3 +395,31 @@ test('treats client buy_btn false as a complete zero-purchase catalog', () => {
   assert.deepEqual(profile.modes,[]);
   assert.equal(profile.source,'client_json_buy_disabled');
 });
+
+
+test('extracts JSON bet_slots buy and ante catalog', () => {
+  const profile=extractBgamingJsonRpcStaticProfile([
+    jsonEvent({
+      bet_slots:[
+        {id:0,rmid:'DEF',tb:'200',tbvs:['20','100','200']},
+        {id:1,rmid:'SHOP',tb:'200',tbvs:['20','100','200'],type:'bb',cmx:'100.000'},
+        {id:2,rmid:'SHOP2',tb:'200',tbvs:['20','100','200'],type:'bb',cmx:'250.000'},
+        {id:3,rmid:'SHOP3',tb:'200',tbvs:['20','100','200'],type:'bb',cmx:'1000.000'},
+        {id:4,rmid:'ANTE',tb:'200',tbvs:['20','40','200'],type:'ante',cmx:'1.300'},
+      ],
+    }, 'https://game.demo.bgaming-network.com/res/data/resdb/bets_data.json'),
+  ]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,false);
+  assert.deepEqual(
+    profile.modes.map(x=>[x.kind,x.id,x.multiplier]),
+    [
+      ['buy','shop',100],
+      ['buy','shop2',250],
+      ['buy','shop3',1000],
+      ['booster','ante',1.3],
+    ],
+  );
+  assert.deepEqual(profile.modes[0].raw_bets,[20,100,200]);
+  assert.deepEqual(profile.modes[3].wire_requirements,['round_mode_id']);
+});
