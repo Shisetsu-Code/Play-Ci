@@ -252,7 +252,7 @@ test('extracts single buy mode from client fsMultiplier', () => {
 
 test('extracts BigBucks single buy multiplier', () => {
   const source=[
-    'class S{initBalance(t){this.buyBonusMultiplier=120}}',
+    'class S{init(){this.buyBonusMultiplier=0}initBalance(t){this.buyBonusMultiplier=120}}',
     'updateBonusPrice(){data.bonusPrices.freespin_buy=data.bet*this.buyBonusMultiplier}',
     'buyBonus(){this.spin(!0,{purchased_feature:"buy_bonus"})}',
   ].join('');
