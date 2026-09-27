@@ -1244,6 +1244,75 @@ function plainSpinOnlyProfile(events) {
   return null;
 }
 
+
+function resolveDefinitionWire(profile, sources) {
+  if (!profile || profile.wire_complete) return profile;
+  if (profile.source !== 'engine_definition_feature_buy_multipliers') return profile;
+
+  const bodies = sources.map((source) => source.body).filter((body) => typeof body === 'string');
+  const hasStarTrekWire = bodies.some((body) =>
+    /customizeFeatureBuyRequestData/.test(body) &&
+    /isFeatureBuyFreeSpin/.test(body) &&
+    /isFeatureBuyRespin/.test(body)
+  );
+
+  if (hasStarTrekWire) {
+    const modes = (profile.modes || []).map((mode) => {
+      const freespin = mode.id === 'freespin';
+      const respin = mode.id === 'respin';
+      if (!freespin && !respin) return mode;
+
+      return {
+        ...mode,
+        request_fields:{
+          purchased_feature:'buy_bonus',
+          bet_type:'bet',
+          custom_req:{
+            selectedWinLines:null,
+            perLine:true,
+            isFeatureBuyFreeSpin:freespin,
+            isFeatureBuyRespin:respin,
+            action:'spin',
+            exponent:2,
+            stake:'<BET_SUBUNITS>',
+          },
+        },
+        wire_complete:true,
+        wire_requirements:[],
+        source:'client_static_feature_buy_flags',
+      };
+    });
+
+    return {
+      ...profile,
+      source:'client_static_feature_buy_flags',
+      wire_complete:true,
+      request_shape:[
+        'purchased_feature',
+        'bet_type',
+        'custom_req.isFeatureBuyFreeSpin',
+        'custom_req.isFeatureBuyRespin',
+        'custom_req.action',
+        'custom_req.exponent',
+        'custom_req.stake',
+      ],
+      modes,
+      evidence_urls:[
+        ...(profile.evidence_urls || []),
+        ...sources
+          .filter((source) =>
+            /customizeFeatureBuyRequestData/.test(source.body) &&
+            /isFeatureBuyFreeSpin/.test(source.body) &&
+            /isFeatureBuyRespin/.test(source.body)
+          )
+          .map((source) => source.url),
+      ],
+    };
+  }
+
+  return profile;
+}
+
 function profileScore(profile) {
   if (!profile) return -1;
   return (
@@ -1255,8 +1324,9 @@ function profileScore(profile) {
 
 export function extractBgamingJsonRpcStaticProfile(events) {
   const candidates = [];
+  const sources = responseSources(events);
 
-  for (const source of responseSources(events)) {
+  for (const source of sources) {
     for (const extractor of [betSlotsModes, buyDisabledConfig, jungleQueenModes, jokerVsJokerModes, redHotChilliChickensModes, mysticReelsModes, clashOfGodsModes, bigBucksModes, blazingFirepotsModes, sweetSamuraiModes, yommiFeatureModes, fsMultiplierBuyMode, jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
       const profile = extractor(source.body, source.url);
       if (profile) candidates.push(profile);
@@ -1264,7 +1334,7 @@ export function extractBgamingJsonRpcStaticProfile(events) {
   }
 
   candidates.sort((a, b) => profileScore(b) - profileScore(a));
-  if (candidates.length) return candidates[0];
+  if (candidates.length) return resolveDefinitionWire(candidates[0], sources);
 
   const ogaNoBuy = ogaNoFeatureBuyProfile(events);
   if (ogaNoBuy) return ogaNoBuy;
