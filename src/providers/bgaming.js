@@ -263,6 +263,79 @@ export function summarizeBgamingBootstrap(start) {
   };
 }
 
+export function summarizeBgamingAllLuckyCloverLauncher() {
+  const variants = [
+    {
+      lines:5,
+      game:'AllLuckyClover5',
+      raw_bets:[10,20,30,40,50,100,150,200,300,500,1000],
+      display_bets:[0.1,0.2,0.3,0.4,0.5,1,1.5,2,3,5,10],
+      default_bet_raw:10,
+    },
+    {
+      lines:20,
+      game:'AllLuckyClover20',
+      raw_bets:[20,40,60,80,100,140,200,300,400,500,1000],
+      display_bets:[0.2,0.4,0.6,0.8,1,1.4,2,3,4,5,10],
+      default_bet_raw:20,
+    },
+    {
+      lines:40,
+      game:'AllLuckyClover40',
+      raw_bets:[40,80,120,160,200,240,320,400,600,800,1600],
+      display_bets:[0.4,0.8,1.2,1.6,2,2.4,3.2,4,6,8,16],
+      default_bet_raw:40,
+    },
+    {
+      lines:100,
+      game:'AllLuckyClover100',
+      raw_bets:[50,100,150,200,250,300,350,400,450,500,1500,2500],
+      display_bets:[0.5,1,1.5,2,2.5,3,3.5,4,4.5,5,15,25],
+      default_bet_raw:50,
+    },
+  ];
+
+  const rawBets = [...new Set(variants.flatMap((entry) => entry.raw_bets))].sort((a, b) => a - b);
+  const displayBets = [...new Set(variants.flatMap((entry) => entry.display_bets))].sort((a, b) => a - b);
+
+  return {
+    provider:'bgaming',
+    generation:'legacy-fixed-lines',
+    api_version:null,
+    actions:['init','spin'],
+    currency:{code:'FUN',symbol:null,subunits:100,exponent:2},
+    bet_encoding:'total_bet_subunits_by_line_variant',
+    raw_bets:rawBets,
+    display_bets:displayBets,
+    default_bet_raw:null,
+    default_bet_display:null,
+    line_count:null,
+    lines:[],
+    line_variants:variants.map((entry) => ({
+      ...entry,
+      default_bet_display:round(entry.default_bet_raw / 100),
+      endpoint_game:entry.game,
+      evidence:'visible_bet_selector+captured_spin_request',
+    })),
+    layout:null,
+    base_bet_reference:null,
+    disabled_features:[],
+    purchased_feature_capabilities:[],
+    special_modes:[],
+    buy_modes:[],
+    boosters:[],
+    other_features:[],
+    bootstrap_maps:[],
+    balance:null,
+    launcher:{
+      game:'AllLuckyClover',
+      line_choices:[5,20,40,100],
+      client_version:'v2.0.89_v14.19.2',
+      evidence:'visible_variant_selector+captured_spin_request',
+    },
+  };
+}
+
 export function summarizeBgamingJsonRpcInit(start, staticProfile = null) {
   const result = start?.body?.result || {};
   const config = result.config || {};
@@ -336,7 +409,7 @@ export function bgamingReviewReasons(protocol) {
   if (!(protocol?.display_bets || []).length) {
     reasons.push({code:'NO_BETS_DECLARED'});
   }
-  if (!['v2','legacy','jsonrpc'].includes(protocol?.generation)) {
+  if (!['v2','legacy','legacy-fixed-lines','jsonrpc'].includes(protocol?.generation)) {
     reasons.push({code:'UNKNOWN_BGAMING_GENERATION'});
   }
   if (
@@ -368,6 +441,24 @@ export function bgamingNeedsReview(protocol) {
 
 export function buildBgamingExecutionBlueprints(protocol) {
   const generation = protocol?.generation || 'unknown';
+
+  if (generation === 'legacy-fixed-lines') {
+    return (protocol?.line_variants || []).map((variant) => ({
+      kind:'spin',
+      id:`spin-lines-${variant.lines}`,
+      lines:variant.lines,
+      endpoint_game:variant.endpoint_game || variant.game,
+      evidence:'visible_bet_selector+captured_spin_request',
+      confidence:'variant_validated',
+      request_template:{
+        command:'spin',
+        options:{bet:'<BET_SUBUNITS>'},
+        extra_data:{round_series_id:'<ROUND_SERIES_ID>'},
+      },
+      allowed_raw_bets:variant.raw_bets || [],
+      allowed_display_bets:variant.display_bets || [],
+    }));
+  }
 
   if (generation === 'jsonrpc') {
     const out = [{
@@ -510,5 +601,6 @@ export function bgamingCatalog(protocol) {
     boosters: protocol?.boosters || [],
     other_features: protocol?.other_features || [],
     purchased_feature_capabilities: protocol?.purchased_feature_capabilities || [],
+    line_variants: protocol?.line_variants || [],
   };
 }
