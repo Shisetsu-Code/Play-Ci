@@ -317,6 +317,30 @@ async function discover(service, url) {
     if (/bgaming-network\.com/i.test(url)) {
       const finalEvents = internal.recorder.eventsAfter(0);
       const unrecognizedInit = extractBgamingUnrecognizedInit(finalEvents);
+      const pageTitle = await internal.page.title().catch(() => '');
+      const finalUrl = internal.page.url();
+
+      if (/^Page Not Found$/i.test(pageTitle.trim())) {
+        return {
+          ok: true,
+          url,
+          provider: 'bgaming',
+          client_family: 'bgaming-unavailable',
+          status: 'UNAVAILABLE_DEMO',
+          duration_ms: Date.now() - started,
+          protocol: null,
+          review_reasons: [{
+            code:'BGAMING_DEMO_NOT_FOUND',
+            final_url:finalUrl,
+            page_title:pageTitle,
+          }],
+          observed_json: summarizeGeneric(finalEvents),
+          declared_features: [],
+          execution_blueprints: [],
+          bootstrap_endpoint: null,
+        };
+      }
+
       return {
         ok: true,
         url,
@@ -1518,9 +1542,11 @@ function buildBetCatalog(targets) {
         bootstrap_maps: protocol.bootstrap_maps || [],
         purchased_feature_capabilities: bg.purchased_feature_capabilities || [],
         catalog_status:
-          target.ok && target.status === 'DISCOVERED'
-            ? 'COMPLETE'
-            : 'REQUIRES_REVIEW',
+          target.status === 'UNAVAILABLE_DEMO'
+            ? 'UNAVAILABLE'
+            : target.ok && target.status === 'DISCOVERED'
+              ? 'COMPLETE'
+              : 'REQUIRES_REVIEW',
       };
     }
 
@@ -1644,6 +1670,7 @@ function markdown(report) {
     '',
     `- Discovered: ${report.summary.discovered}/${report.summary.total_targets}`,
     `- Requires review: ${report.summary.requires_review}`,
+    `- Demo unavailable: ${report.summary.unavailable_targets}`,
     `- Declared buy modes: ${report.summary.declared_buy_modes}`,
     `- Declared booster modes: ${report.summary.declared_booster_modes}`,
     `- Declared other feature modes: ${report.summary.declared_other_features}`,
@@ -1658,6 +1685,7 @@ function markdown(report) {
     `- Targets covered by representative runtime validation: ${report.summary.runtime_covered_targets}`,
     `- Bet catalogs complete: ${report.summary.catalog_complete}/${report.summary.total_targets}`,
     `- Catalogs requiring review: ${report.summary.catalog_requires_review}`,
+    `- Catalogs unavailable in demo: ${report.summary.catalog_unavailable}`,
     '',
   ];
 
@@ -1766,6 +1794,7 @@ try {
       total_targets: urls.length,
       discovered: targets.filter((entry) => entry?.ok).length,
       requires_review: targets.filter((entry) => entry?.status === 'REQUIRES_REVIEW').length,
+      unavailable_targets: targets.filter((entry) => entry?.status === 'UNAVAILABLE_DEMO').length,
       declared_buy_modes: countDeclared(targets, 'buy'),
       declared_booster_modes: countDeclared(targets, 'booster'),
       declared_other_features: countDeclared(targets, 'feature'),
@@ -1782,7 +1811,8 @@ try {
       validation_signatures: groups.length,
       runtime_covered_targets: new Set(validations.flatMap((entry) => entry?.covers_urls || [])).size,
       catalog_complete: catalog.filter((entry) => entry.catalog_status === 'COMPLETE').length,
-      catalog_requires_review: catalog.filter((entry) => entry.catalog_status !== 'COMPLETE').length,
+      catalog_requires_review: catalog.filter((entry) => entry.catalog_status === 'REQUIRES_REVIEW').length,
+      catalog_unavailable: catalog.filter((entry) => entry.catalog_status === 'UNAVAILABLE').length,
     },
   };
 
@@ -1793,7 +1823,7 @@ try {
   await fs.writeFile(path.join(OUTPUT_DIR, 'bet-catalog.csv'), catalogCsv(catalog), 'utf8');
 
   const unfinishedTargets = catalog
-    .filter((entry) => entry.catalog_status !== 'COMPLETE')
+    .filter((entry) => entry.catalog_status === 'REQUIRES_REVIEW')
     .map((entry) => entry.url);
   await fs.writeFile(
     path.join(OUTPUT_DIR, 'unfinished-targets.txt'),
@@ -1825,6 +1855,15 @@ try {
   await fs.writeFile(
     path.join(OUTPUT_DIR, 'review-targets.txt'),
     reviewTargets.length ? `${reviewTargets.join('\n')}\n` : '',
+    'utf8',
+  );
+
+  const unavailableTargets = targets
+    .filter((target) => target.status === 'UNAVAILABLE_DEMO')
+    .map((target) => target.url);
+  await fs.writeFile(
+    path.join(OUTPUT_DIR, 'unavailable-targets.txt'),
+    unavailableTargets.length ? `${unavailableTargets.join('\n')}\n` : '',
     'utf8',
   );
 
