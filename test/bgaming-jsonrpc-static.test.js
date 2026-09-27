@@ -492,10 +492,13 @@ test('resolves StarTrek feature-buy flags across definitions and game client', (
       x.request_fields.custom_req.isFeatureBuyRespin,
       x.request_fields.custom_req.action,
       x.request_fields.custom_req.stake,
+      x.request_fields.bet,
+      x.bet_transform,
     ]),
     [
-      ['freespin',75,true,false,'spin','<BET_SUBUNITS>'],
-      ['respin',30,false,true,'spin','<BET_SUBUNITS>'],
+      ['freespin',75,true,false,'spin','<PURCHASE_BET_SUBUNITS>','<PURCHASE_BET_SUBUNITS>','base_bet * multiplier'],
+      ['respin',30,false,true,'spin','<PURCHASE_BET_SUBUNITS>','<PURCHASE_BET_SUBUNITS>','base_bet * multiplier'],
     ],
   );
+  assert.equal(profile.modes[0].request_fields.custom_req.exponent,'<CURRENCY_EXPONENT>');
 });
