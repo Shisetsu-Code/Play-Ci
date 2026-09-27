@@ -1035,6 +1035,79 @@ function jungleQueenModes(source, sourceUrl) {
   };
 }
 
+
+function betSlotsModes(source, sourceUrl) {
+  let body;
+  try { body = JSON.parse(source); } catch { return null; }
+  const slots = body?.bet_slots;
+  if (!Array.isArray(slots) || slots.length < 2) return null;
+
+  const modes = [];
+  for (const slot of slots) {
+    if (!slot || typeof slot !== 'object') continue;
+    const type = String(slot.type || '').toLowerCase();
+    const multiplier = Number(slot.cmx);
+    const id = Number(slot.id);
+    const rmid = slot.rmid != null ? String(slot.rmid) : null;
+    const rawBets = Array.isArray(slot.tbvs)
+      ? slot.tbvs.map(Number).filter(Number.isFinite)
+      : [];
+
+    if (!Number.isFinite(multiplier) || multiplier <= 0 || !rmid) continue;
+
+    if (type === 'bb') {
+      modes.push({
+        kind:'buy',
+        feature:'buy_bonus',
+        id:rmid.toLowerCase(),
+        level:rmid,
+        multiplier,
+        raw_value:multiplier,
+        activation:false,
+        request_fields:null,
+        wire_complete:false,
+        wire_requirements:['round_mode_id'],
+        raw_bets:rawBets,
+        default_bet_raw:Number.isFinite(Number(slot.tb)) ? Number(slot.tb) : null,
+        source:'client_json_bet_slots',
+        evidence_url:sourceUrl,
+      });
+      continue;
+    }
+
+    if (type === 'ante') {
+      modes.push({
+        kind:'booster',
+        feature:'buy_chance',
+        id:rmid.toLowerCase(),
+        level:rmid,
+        multiplier,
+        raw_value:multiplier,
+        activation:true,
+        request_fields:null,
+        wire_complete:false,
+        wire_requirements:['round_mode_id'],
+        raw_bets:rawBets,
+        default_bet_raw:Number.isFinite(Number(slot.tb)) ? Number(slot.tb) : null,
+        source:'client_json_bet_slots',
+        evidence_url:sourceUrl,
+      });
+    }
+  }
+
+  const unique = dedupeModes(modes);
+  if (!unique.length) return null;
+
+  return {
+    source:'client_json_bet_slots',
+    catalog_complete:true,
+    wire_complete:false,
+    request_shape:[],
+    modes:unique,
+    evidence_urls:[sourceUrl],
+  };
+}
+
 function dedupeModes(modes) {
   const seen = new Set();
   const out = [];
@@ -1065,7 +1138,7 @@ export function extractBgamingJsonRpcStaticProfile(events) {
   const candidates = [];
 
   for (const source of responseSources(events)) {
-    for (const extractor of [buyDisabledConfig, jungleQueenModes, jokerVsJokerModes, redHotChilliChickensModes, mysticReelsModes, clashOfGodsModes, bigBucksModes, blazingFirepotsModes, sweetSamuraiModes, yommiFeatureModes, fsMultiplierBuyMode, jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
+    for (const extractor of [betSlotsModes, buyDisabledConfig, jungleQueenModes, jokerVsJokerModes, redHotChilliChickensModes, mysticReelsModes, clashOfGodsModes, bigBucksModes, blazingFirepotsModes, sweetSamuraiModes, yommiFeatureModes, fsMultiplierBuyMode, jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
       const profile = extractor(source.body, source.url);
       if (profile) candidates.push(profile);
     }
