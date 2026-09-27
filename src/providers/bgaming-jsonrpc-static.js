@@ -1265,6 +1265,7 @@ function resolveDefinitionWire(profile, sources) {
       return {
         ...mode,
         request_fields:{
+          bet:'<PURCHASE_BET_SUBUNITS>',
           purchased_feature:'buy_bonus',
           bet_type:'bet',
           custom_req:{
@@ -1273,10 +1274,11 @@ function resolveDefinitionWire(profile, sources) {
             isFeatureBuyFreeSpin:freespin,
             isFeatureBuyRespin:respin,
             action:'spin',
-            exponent:2,
-            stake:'<BET_SUBUNITS>',
+            exponent:'<CURRENCY_EXPONENT>',
+            stake:'<PURCHASE_BET_SUBUNITS>',
           },
         },
+        bet_transform:'base_bet * multiplier',
         wire_complete:true,
         wire_requirements:[],
         source:'client_static_feature_buy_flags',
