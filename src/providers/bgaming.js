@@ -520,6 +520,7 @@ export function buildBgamingExecutionBlueprints(protocol) {
           ? 'JSONRPC_WIRE_REQUIRES_GAME_CONTEXT'
           : null,
         wire_requirements:mode.wire_requirements || [],
+        bet_transform:mode.bet_transform || null,
       });
     }
     return out;
