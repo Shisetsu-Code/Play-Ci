@@ -266,3 +266,35 @@ test('models AllLuckyClover launcher as four fixed-line wire variants', () => {
   const catalog=bgamingCatalog(p);
   assert.equal(catalog.line_variants.length,4);
 });
+
+
+test('JSONRPC unresolved catalog mode does not invent a request template', () => {
+  const p=summarizeBgamingJsonRpcInit({
+    body:{jsonrpc:'2.0',result:{
+      currency_attributes:{code:'FUN',subunits:100},
+      config:{bet_limits:[20,100],default_bet:20,purchased_features:['buy_bonus']},
+    }},
+    request:null,
+  }, {
+    source:'client_static_buy_bonus_costs',
+    catalog_complete:true,
+    wire_complete:false,
+    request_shape:[],
+    evidence_urls:['https://game/assets/main.js'],
+    modes:[{
+      kind:'buy',
+      feature:'buy_bonus',
+      id:'deep_spin',
+      level:'deep_spin',
+      multiplier:100,
+      request_fields:null,
+      wire_complete:false,
+      wire_requirements:['game_specific_buy_bonus_wire'],
+      source:'client_static_buy_bonus_costs',
+    }],
+  });
+  const blueprints=buildBgamingExecutionBlueprints(p);
+  assert.equal(blueprints.length,2);
+  assert.equal(blueprints[1].request_template,null);
+  assert.equal(blueprints[1].unresolved_reason,'JSONRPC_WIRE_REQUIRES_GAME_CONTEXT');
+});
