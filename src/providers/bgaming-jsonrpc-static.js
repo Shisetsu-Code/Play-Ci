@@ -3,8 +3,8 @@ function responseSources(events) {
     .filter((event) =>
       event?.type === 'responsebody' &&
       typeof event.body === 'string' &&
-      event.body.length >= 80 &&
-      /\.(?:js|mjs)(?:\?|$)/i.test(event.url || '')
+      event.body.length >= 40 &&
+      /\.(?:js|mjs|json)(?:\?|$)/i.test(event.url || '')
     )
     .map((event) => ({url:event.url || '', body:event.body}));
 }
@@ -279,6 +279,252 @@ function treasureModes(source, sourceUrl) {
   };
 }
 
+
+function jsonBuyFeatureModes(source, sourceUrl) {
+  let body;
+  try { body = JSON.parse(source); } catch { return null; }
+
+  const groups = [];
+  const seen = new Set();
+
+  function visit(value, path = '', depth = 0) {
+    if (value == null || depth > 12) return;
+    if (Array.isArray(value)) {
+      for (let i = 0; i < Math.min(value.length, 200); i++) {
+        visit(value[i], path + '[' + i + ']', depth + 1);
+      }
+      return;
+    }
+    if (typeof value !== 'object') return;
+
+    if (value.buyFeatureInfo && Array.isArray(value.buyFeatureInfo.configs)) {
+      const key = path + '.buyFeatureInfo.configs';
+      if (!seen.has(key)) {
+        seen.add(key);
+        groups.push({path:key, configs:value.buyFeatureInfo.configs});
+      }
+    }
+
+    for (const [key, child] of Object.entries(value)) {
+      const next = path ? path + '.' + key : key;
+      visit(child, next, depth + 1);
+    }
+  }
+
+  visit(body);
+  const modes = [];
+
+  for (const group of groups) {
+    for (const config of group.configs) {
+      const feature = config?.purchasedFeature;
+      const id = config?.buyFeatureId;
+      const percent = Number(config?.pricePercent);
+      if (typeof feature !== 'string' || id == null || !Number.isFinite(percent)) continue;
+
+      const multiplier = roundPricePercent(percent);
+      modes.push({
+        kind:modeKind(feature, feature === 'buy_chance'),
+        feature,
+        id:String(id),
+        level:String(id),
+        multiplier,
+        raw_value:percent,
+        activation:feature === 'buy_chance',
+        request_fields:{
+          purchased_feature:feature,
+          buy_feature_id:id,
+        },
+        wire_complete:true,
+        source:'client_json_buy_feature_config',
+        evidence_url:sourceUrl,
+      });
+    }
+  }
+
+  const unique = dedupeModes(modes);
+  if (!unique.length) return null;
+
+  return {
+    source:'client_json_buy_feature_config',
+    catalog_complete:true,
+    wire_complete:true,
+    request_shape:['buy_feature_id'],
+    modes:unique,
+    evidence_urls:[sourceUrl],
+  };
+}
+
+function roundPricePercent(value) {
+  return Math.round((Number(value) / 100 + Number.EPSILON) * 1e8) / 1e8;
+}
+
+function definitionModes(source, sourceUrl) {
+  let body;
+  try { body = JSON.parse(source); } catch { return null; }
+  const definition = body?.engine?.definition;
+  if (!definition || typeof definition !== 'object') return null;
+
+  const modes = [];
+
+  const normal = Number(definition.normalBuyCost);
+  const superBuy = Number(definition.superBuyCost);
+  if (Number.isFinite(normal) && Number.isFinite(superBuy)) {
+    modes.push(
+      {
+        kind:'buy',
+        feature:'buy_bonus',
+        id:'normal',
+        level:'normal',
+        multiplier:normal,
+        raw_value:normal,
+        activation:false,
+        request_fields:{purchased_feature:'buy_bonus'},
+        wire_complete:false,
+        wire_requirements:['custom_req.buy_mode'],
+        source:'engine_definition_buy_costs',
+        evidence_url:sourceUrl,
+      },
+      {
+        kind:'buy',
+        feature:'buy_bonus',
+        id:'super',
+        level:'super',
+        multiplier:superBuy,
+        raw_value:superBuy,
+        activation:false,
+        request_fields:{purchased_feature:'buy_bonus'},
+        wire_complete:false,
+        wire_requirements:['custom_req.buy_mode'],
+        source:'engine_definition_buy_costs',
+        evidence_url:sourceUrl,
+      },
+    );
+  }
+
+  const freespin = Number(definition.featureBuyMulFreespin);
+  const respin = Number(definition.featureBuyMulRespin);
+  if (Number.isFinite(freespin) && Number.isFinite(respin)) {
+    modes.push(
+      {
+        kind:'buy',
+        feature:'buy_bonus',
+        id:'freespin',
+        level:'freespin',
+        multiplier:freespin,
+        raw_value:freespin,
+        activation:false,
+        request_fields:{purchased_feature:'buy_bonus'},
+        wire_complete:false,
+        wire_requirements:['custom_req.isFeatureBuyFreeSpin'],
+        source:'engine_definition_feature_buy_multipliers',
+        evidence_url:sourceUrl,
+      },
+      {
+        kind:'buy',
+        feature:'buy_bonus',
+        id:'respin',
+        level:'respin',
+        multiplier:respin,
+        raw_value:respin,
+        activation:false,
+        request_fields:{purchased_feature:'buy_bonus'},
+        wire_complete:false,
+        wire_requirements:['custom_req.isFeatureBuyRespin'],
+        source:'engine_definition_feature_buy_multipliers',
+        evidence_url:sourceUrl,
+      },
+    );
+  }
+
+  const unique = dedupeModes(modes);
+  if (!unique.length) return null;
+
+  return {
+    source:unique[0].source,
+    catalog_complete:true,
+    wire_complete:false,
+    request_shape:[],
+    modes:unique,
+    evidence_urls:[sourceUrl],
+  };
+}
+
+function bonusMultiplierModes(source, sourceUrl) {
+  if (!/bonus_multiplier_type\s*:/.test(source)) return null;
+  if (!/purchased_feature\s*:\s*["']buy_bonus["']/.test(source)) return null;
+
+  const types = [...source.matchAll(
+    /purchased_feature\s*:\s*["']buy_bonus["'][^{}]{0,240}bonus_multiplier_type\s*:\s*["']([^"']+)["']/g
+  )].map((match) => match[1]);
+
+  const pricesMatch = source.match(
+    /const\s+[A-Za-z_$][\w$]*\s*=\s*[^,;]+,\s*([A-Za-z_$][\w$]*)\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*\*\s*[A-Za-z_$][\w$]*\.bet\s*,\s*([A-Za-z_$][\w$]*)\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*\*\s*[A-Za-z_$][\w$]*\.bet/
+  );
+
+  const orderedTypes = [...new Set(types)].slice(0, 2);
+  const prices = pricesMatch ? [Number(pricesMatch[2]), Number(pricesMatch[4])] : [];
+  const modes = [];
+
+  if (orderedTypes.length === 2 && prices.length === 2) {
+    for (let i = 0; i < 2; i++) {
+      modes.push({
+        kind:'buy',
+        feature:'buy_bonus',
+        id:orderedTypes[i],
+        level:orderedTypes[i],
+        multiplier:prices[i],
+        raw_value:prices[i],
+        activation:false,
+        request_fields:{
+          purchased_feature:'buy_bonus',
+          bonus_multiplier_type:orderedTypes[i],
+        },
+        wire_complete:true,
+        source:'client_static_bonus_multiplier',
+        evidence_url:sourceUrl,
+      });
+    }
+  }
+
+  let chanceMultiplier = null;
+  const chanceLiteral = source.match(/\bgoldenBetMulti\s*:\s*([0-9]+(?:\.[0-9]+)?)/);
+  if (chanceLiteral) chanceMultiplier = Number(chanceLiteral[1]);
+
+  if (
+    Number.isFinite(chanceMultiplier) &&
+    /purchased_feature\s*:\s*[^,;?]*["']buy_chance["']/.test(source)
+  ) {
+    modes.unshift({
+      kind:'booster',
+      feature:'buy_chance',
+      id:'buy_chance',
+      level:'buy_chance',
+      multiplier:chanceMultiplier,
+      raw_value:chanceMultiplier,
+      activation:true,
+      request_fields:{
+        purchased_feature:'buy_chance',
+        bet_type:'bet',
+      },
+      wire_complete:true,
+      source:'client_static_bonus_multiplier',
+      evidence_url:sourceUrl,
+    });
+  }
+
+  const unique = dedupeModes(modes);
+  if (unique.length < 2) return null;
+
+  return {
+    source:'client_static_bonus_multiplier',
+    catalog_complete:unique.length >= 3,
+    wire_complete:true,
+    request_shape:['bonus_multiplier_type'],
+    modes:unique,
+    evidence_urls:[sourceUrl],
+  };
+}
+
 function dedupeModes(modes) {
   const seen = new Set();
   const out = [];
@@ -309,7 +555,7 @@ export function extractBgamingJsonRpcStaticProfile(events) {
   const candidates = [];
 
   for (const source of responseSources(events)) {
-    for (const extractor of [configuredModes, chickenModes, treasureModes, shopModes]) {
+    for (const extractor of [jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
       const profile = extractor(source.body, source.url);
       if (profile) candidates.push(profile);
     }
