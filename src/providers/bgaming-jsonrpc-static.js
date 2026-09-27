@@ -3,7 +3,7 @@ function responseSources(events) {
     .filter((event) =>
       event?.type === 'responsebody' &&
       typeof event.body === 'string' &&
-      event.body.length >= 40 &&
+      event.body.length >= 20 &&
       /\.(?:js|mjs|json)(?:\?|$)/i.test(event.url || '')
     )
     .map((event) => ({url:event.url || '', body:event.body}));
