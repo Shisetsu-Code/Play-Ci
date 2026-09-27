@@ -853,6 +853,67 @@ function clashOfGodsModes(source, sourceUrl) {
   };
 }
 
+
+function redHotChilliChickensModes(source, sourceUrl) {
+  if (!/purchased_feature\s*:\s*["']bonus_buy["']/.test(source)) return null;
+  if (!/\bisSuperBonus\b/.test(source)) return null;
+
+  const prices = source.match(
+    /isSuperBonus\s*\?\s*([0-9]+(?:\.[0-9]+)?)\s*:\s*([0-9]+(?:\.[0-9]+)?)/
+  );
+  if (!prices) return null;
+
+  const superMultiplier = Number(prices[1]);
+  const normalMultiplier = Number(prices[2]);
+  if (!Number.isFinite(normalMultiplier) || !Number.isFinite(superMultiplier)) return null;
+
+  const betType = /bet_type\s*:\s*["']betting["']/.test(source) ? 'betting' : 'bet';
+
+  return {
+    source:'client_static_bonus_buy_variants',
+    catalog_complete:true,
+    wire_complete:true,
+    request_shape:['purchased_feature','isSuperBonus','bet_type'],
+    modes:[
+      {
+        kind:'buy',
+        feature:'bonus_buy',
+        id:'bonus_buy',
+        level:'normal',
+        multiplier:normalMultiplier,
+        raw_value:normalMultiplier,
+        activation:false,
+        request_fields:{
+          purchased_feature:'bonus_buy',
+          isSuperBonus:false,
+          bet_type:betType,
+        },
+        wire_complete:true,
+        source:'client_static_bonus_buy_variants',
+        evidence_url:sourceUrl,
+      },
+      {
+        kind:'buy',
+        feature:'bonus_buy',
+        id:'super_bonus_buy',
+        level:'super',
+        multiplier:superMultiplier,
+        raw_value:superMultiplier,
+        activation:false,
+        request_fields:{
+          purchased_feature:'bonus_buy',
+          isSuperBonus:true,
+          bet_type:betType,
+        },
+        wire_complete:true,
+        source:'client_static_bonus_buy_variants',
+        evidence_url:sourceUrl,
+      },
+    ],
+    evidence_urls:[sourceUrl],
+  };
+}
+
 function dedupeModes(modes) {
   const seen = new Set();
   const out = [];
@@ -883,7 +944,7 @@ export function extractBgamingJsonRpcStaticProfile(events) {
   const candidates = [];
 
   for (const source of responseSources(events)) {
-    for (const extractor of [mysticReelsModes, clashOfGodsModes, bigBucksModes, blazingFirepotsModes, sweetSamuraiModes, yommiFeatureModes, fsMultiplierBuyMode, jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
+    for (const extractor of [redHotChilliChickensModes, mysticReelsModes, clashOfGodsModes, bigBucksModes, blazingFirepotsModes, sweetSamuraiModes, yommiFeatureModes, fsMultiplierBuyMode, jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
       const profile = extractor(source.body, source.url);
       if (profile) candidates.push(profile);
     }
