@@ -1,128 +1,157 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import { config } from '../src/config.js';
 import { BrowserService } from '../src/browser-service.js';
+import { extractBgamingJsonRpcInit } from '../src/providers/bgaming.js';
 
-const games=['SugarMix','YommiRush','BlackbeardsBounty','ChickenFire'];
+const games=[
+  'AztecsClawWildDice','BigBucksSaloon','BlackbeardsBounty','BlazingFirepots',
+  'BlingBlitzDiamondDrop','CatsLoveYummy','ChickenFire','ClashofGodsAnubisvsHades',
+  'CluckingHell','GrandPatron7rst','HotRocket532','JewelBoom','JokerVsJoker',
+  'JungleQueen','KeepersOfTheSecret7rst','MultiRush','MysticReels','RecycleRiches',
+  'RedHotChilliChickens','RocketEruptionTripleBlast','StarTrekNextGen','SugarMix',
+  'SweetSamurai','GatesOfPower','TheGodfather3PillarsOfPower','TreasureExplorer',
+  'WildClustersP','YommiRush','ZeusGoesWild',
+];
+
+const service=new BrowserService({
+  ...config,
+  maxBodyBytes:8*1024*1024,
+  maxMemoryEvents:30000,
+});
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-const service=new BrowserService(config);
 
-async function enter(page){
-  await sleep(7000);
-  for(const [x,y,wait] of [
-    [640,650,900],
-    [640,615,700],
-    [640,570,700],
-    [640,680,700],
-    [1140,650,1400],
-  ]){
-    await page.mouse.click(x,y);
-    await sleep(wait);
-  }
-  await sleep(2500);
+function parseJson(text){
+  try{return JSON.parse(text)}catch{return null}
 }
 
-async function frameSnapshot(frame){
-  return frame.evaluate(()=>{
-    const clean=(value,max=240)=>String(value||'').replace(/\s+/g,' ').trim().slice(0,max);
-    const selector=[
-      'button','a','input','[role="button"]','[tabindex]',
-      '*[class*="button" i]','*[class*="btn" i]'
-    ].join(',');
-    const nodes=[...document.querySelectorAll(selector)];
-    const controls=[];
-    const seen=new Set();
+function collectJsonRpcConfig(init){
+  const cfg=init?.body?.result?.config||{};
+  return {
+    bet_limits:cfg.bet_limits||[],
+    default_bet:cfg.default_bet??null,
+    purchased_features:Array.isArray(cfg.purchased_features)?cfg.purchased_features:[],
+    config_keys:Object.keys(cfg).sort(),
+  };
+}
 
-    for(const el of nodes){
-      const r=el.getBoundingClientRect();
-      if(r.width<2||r.height<2) continue;
-      const st=getComputedStyle(el);
-      if(st.visibility==='hidden'||st.display==='none'||Number(st.opacity)===0) continue;
-      const text=clean(el.textContent);
-      const aria=clean(el.getAttribute('aria-label'));
-      const title=clean(el.getAttribute('title'));
-      const className=clean(el.className);
-      const key=[Math.round(r.x),Math.round(r.y),Math.round(r.width),Math.round(r.height),text,aria].join(':');
-      if(seen.has(key)) continue;
-      seen.add(key);
-      controls.push({
-        tag:el.tagName,
-        text,
-        aria,
-        title,
-        id:el.id||null,
-        className,
-        role:el.getAttribute('role'),
-        cursor:st.cursor,
-        rect:{x:r.x,y:r.y,width:r.width,height:r.height},
+function interestingStrings(body){
+  const out=new Set();
+  const patterns=[
+    /["'`]((?:buy|bonus|freespin|free_spin|chance|feature)[A-Za-z0-9_-]{0,80})["'`]/gi,
+    /["'`]([A-Za-z0-9_-]{0,40}(?:buy|bonus|freespin|free_spin|chance|feature)[A-Za-z0-9_-]{0,40})["'`]/gi,
+    /["'`]((?:freeSpin|buyBonus|bonusMultiplier|featureId)[A-Za-z0-9_-]{0,80})["'`]/g,
+  ];
+  for(const regex of patterns){
+    let match;
+    while((match=regex.exec(body))!==null){
+      const value=match[1];
+      if(value.length>=3&&value.length<=100) out.add(value);
+      if(out.size>=300) break;
+    }
+  }
+  return [...out].sort();
+}
+
+function markerSnippets(body){
+  const markers=['purchased_feature','feature_id','featureId','bonus_multiplier_type','buy_super_bonus','buy_ultra_bonus','freeSpinRandom'];
+  const snippets=[];
+  for(const marker of markers){
+    let from=0;
+    while(snippets.length<80){
+      const idx=body.indexOf(marker,from);
+      if(idx<0) break;
+      const start=Math.max(0,idx-180);
+      const end=Math.min(body.length,idx+marker.length+260);
+      snippets.push({marker,snippet:body.slice(start,end)});
+      from=idx+marker.length;
+    }
+  }
+  return snippets;
+}
+
+async function inspect(game){
+  const url=`https://demo.bgaming-network.com/play/${game}/FUN`;
+  const session=await service.createSession({url,skipSplash:false,captureInitialScreenshot:false});
+  const internal=service.sessions.get(session.id);
+  try{
+    await sleep(6500);
+    await internal.recorder.waitForQuiet({quietMs:500,timeoutMs:2500}).catch(()=>{});
+    const events=internal.recorder.eventsAfter(0);
+    const init=extractBgamingJsonRpcInit(events);
+    const sources=[];
+    const tokenUnion=new Set();
+
+    for(const event of events){
+      if(event.type!=='responsebody'||typeof event.body!=='string'||!event.body) continue;
+      const body=event.body;
+      const tokens=interestingStrings(body);
+      const snippets=markerSnippets(body);
+      if(tokens.length===0&&snippets.length===0) continue;
+      for(const token of tokens) tokenUnion.add(token);
+      sources.push({
+        url:event.url,
+        bytes:Buffer.byteLength(body),
+        content_json:Boolean(parseJson(body)),
+        tokens,
+        snippets,
       });
-      if(controls.length>=400) break;
+      if(sources.length>=80) break;
     }
 
     return {
-      url:location.href,
-      title:document.title,
-      bodyText:clean(document.body?.innerText,4000),
-      controls,
-      canvases:[...document.querySelectorAll('canvas')].map(c=>{
-        const r=c.getBoundingClientRect();
-        return {width:c.width,height:c.height,rect:{x:r.x,y:r.y,width:r.width,height:r.height}};
-      }),
-      iframes:[...document.querySelectorAll('iframe')].map(f=>{
-        const r=f.getBoundingClientRect();
-        return {src:f.src,rect:{x:r.x,y:r.y,width:r.width,height:r.height}};
-      }),
+      game,url,ok:true,
+      final_url:internal.page.url(),
+      init:collectJsonRpcConfig(init),
+      extracted_tokens:[...tokenUnion].sort(),
+      sources,
     };
-  }).catch(error=>({url:frame.url(),error:error.message}));
+  }catch(error){
+    return {game,url,ok:false,error:error.message};
+  }finally{
+    await service.closeSession(session.id);
+  }
+}
+
+async function pool(items,limit,fn){
+  const out=new Array(items.length);
+  let cursor=0;
+  async function worker(){
+    while(true){
+      const index=cursor++;
+      if(index>=items.length)return;
+      out[index]=await fn(items[index]);
+      await sleep(250);
+    }
+  }
+  await Promise.all(Array.from({length:limit},worker));
+  return out;
 }
 
 await service.start();
 try{
-  const results=[];
-  for(const game of games){
-    const url=`https://demo.bgaming-network.com/play/${game}/FUN`;
-    const s=await service.createSession({url,skipSplash:false,captureInitialScreenshot:false});
-    const internal=service.sessions.get(s.id);
-    const dir=path.join('artifacts','bg-jsonrpc-ui',game);
-    await fs.mkdir(dir,{recursive:true});
-    try{
-      await enter(internal.page);
-      const shot=await service.capture(s.id,'game');
-      await fs.copyFile(path.resolve(shot.path),path.join(dir,'game.png'));
+  const results=await pool(games,4,inspect);
+  await fs.mkdir('artifacts/bg-jsonrpc-ui',{recursive:true});
+  await fs.writeFile('artifacts/bg-jsonrpc-ui/asset-feature-scan.json',JSON.stringify(results,null,2),'utf8');
+  await fs.writeFile('artifacts/bg-jsonrpc-ui/manifest.json',JSON.stringify(results.map(r=>({
+    game:r.game,
+    ok:r.ok,
+    final_url:r.final_url||null,
+    purchased_features:r.init?.purchased_features||[],
+    extracted_tokens:r.extracted_tokens||[],
+    source_count:r.sources?.length||0,
+    error:r.error||null,
+  })),null,2),'utf8');
 
-      const frames=[];
-      for(const frame of internal.page.frames()){
-        frames.push(await frameSnapshot(frame));
-      }
-      await fs.writeFile(path.join(dir,'frames.json'),JSON.stringify(frames,null,2),'utf8');
-      results.push({game,url,ok:true,frames});
-    }catch(error){
-      results.push({game,url,ok:false,error:error.message});
-    }finally{
-      await service.closeSession(s.id);
-      await sleep(300);
-    }
-  }
-
-  await fs.writeFile('artifacts/bg-jsonrpc-ui/manifest.json',JSON.stringify(results,null,2),'utf8');
-  const summary=results.map(result=>({
-    game:result.game,
-    ok:result.ok,
-    frames:(result.frames||[]).map(frame=>({
-      url:frame.url,
-      bodyText:frame.bodyText,
-      controls:(frame.controls||[]).filter(c=>
-        /buy|bonus|chance|golden|spin|bet/i.test(
-          [c.text,c.aria,c.title,c.id,c.className].filter(Boolean).join(' ')
-        )
-      ).slice(0,100),
-      canvasCount:(frame.canvases||[]).length,
-      iframeCount:(frame.iframes||[]).length,
-      error:frame.error||null,
-    })),
-    error:result.error||null,
-  }));
-  console.log(JSON.stringify(summary,null,2));
+  console.log(JSON.stringify(results.map(r=>({
+    game:r.game,
+    ok:r.ok,
+    purchased_features:r.init?.purchased_features||[],
+    extracted_tokens:(r.extracted_tokens||[]).filter(x=>
+      /buy|chance|feature_id|featureId|freeSpinRandom|super_bonus|ultra_bonus/i.test(x)
+    ).slice(0,80),
+    marker_sources:(r.sources||[]).filter(s=>s.snippets?.length).map(s=>s.url).slice(0,12),
+    error:r.error||null,
+  })),null,2));
 }finally{
   await service.stop();
 }
