@@ -1126,6 +1126,102 @@ function dedupeModes(modes) {
 }
 
 
+
+function hasDeepKey(value, pattern, depth = 0) {
+  if (value == null || depth > 12) return false;
+  if (Array.isArray(value)) {
+    return value.some((entry) => hasDeepKey(entry, pattern, depth + 1));
+  }
+  if (typeof value !== 'object') return false;
+
+  for (const [key, child] of Object.entries(value)) {
+    if (pattern.test(key)) return true;
+    if (hasDeepKey(child, pattern, depth + 1)) return true;
+  }
+  return false;
+}
+
+function parseJsonSource(source) {
+  try { return JSON.parse(source.body); } catch { return null; }
+}
+
+function ogaNoFeatureBuyProfile(events) {
+  const sources = responseSources(events);
+  let definitions = null;
+  let gameConfig = null;
+  let clientAdapter = null;
+  let gameBundle = null;
+
+  for (const source of sources) {
+    if (/definitions(?:\.[^/?]+)?\.json(?:\?|$)/i.test(source.url)) {
+      const body = parseJsonSource(source);
+      if (body?.oga?.game && body?.engine?.definition) {
+        definitions = {source, body};
+      }
+      continue;
+    }
+
+    if (/gameConfig\.json(?:\?|$)/i.test(source.url)) {
+      const body = parseJsonSource(source);
+      if (body && typeof body === 'object') gameConfig = {source, body};
+      continue;
+    }
+
+    if (/client\.min\.js(?:\?|$)/i.test(source.url)) {
+      if (
+        /definitionsGameData\.engine\.definition\.featureBuyMulRespin/.test(source.body) &&
+        /definitionsGameData\.engine\.definition\.featureBuyMulFreespin/.test(source.body)
+      ) {
+        clientAdapter = source;
+      }
+      continue;
+    }
+
+    if (/game\.min\.js(?:\?|$)/i.test(source.url)) {
+      gameBundle = source;
+    }
+  }
+
+  if (!definitions || !gameConfig || !clientAdapter || !gameBundle) return null;
+  if (gameConfig.body?.autoplay?.onBonusFeature !== false) return null;
+
+  const definition = definitions.body.engine.definition;
+  if (
+    hasDeepKey(
+      definition,
+      /feature.*buy|buy.*feature|buy.*cost|featureBuyMul|normalBuyCost|superBuyCost/i,
+    )
+  ) {
+    return null;
+  }
+
+  const gameSpecificFeatureMarkers =
+    /isFeatureBuyRespin|isFeatureBuyFreeSpin|featureBuyMulRespin|featureBuyMulFreespin|purchaseFeaturesConfig|buyFeatureId|buy_feature_id|bonus_multiplier_type|feature_id\s*:/i;
+  if (gameSpecificFeatureMarkers.test(gameBundle.body)) return null;
+
+  const gameJsonPurchaseMarkers =
+    /"buy_bonus"|"buy_chance"|"buy_bonus_and_chance"|"featureBuyMul|"purchaseFeaturesConfig"|"buyFeatureId"|"buy_feature_id"/i;
+  for (const source of sources) {
+    if (!/\.json(?:\?|$)/i.test(source.url)) continue;
+    if (source === definitions.source || source === gameConfig.source) continue;
+    if (gameJsonPurchaseMarkers.test(source.body)) return null;
+  }
+
+  return {
+    source:'client_oga_no_feature_buy_definition',
+    catalog_complete:true,
+    wire_complete:true,
+    request_shape:[],
+    modes:[],
+    evidence_urls:[
+      definitions.source.url,
+      gameConfig.source.url,
+      clientAdapter.url,
+      gameBundle.url,
+    ],
+  };
+}
+
 function plainSpinOnlyProfile(events) {
   const purchaseMarkers = /purchased_feature|buy_bonus|buy_chance|buy_bonus_and_chance|purchaseFeature|buyFeature|buyBonus|bonus_buy|freespin_buy/i;
 
@@ -1169,6 +1265,9 @@ export function extractBgamingJsonRpcStaticProfile(events) {
 
   candidates.sort((a, b) => profileScore(b) - profileScore(a));
   if (candidates.length) return candidates[0];
+
+  const ogaNoBuy = ogaNoFeatureBuyProfile(events);
+  if (ogaNoBuy) return ogaNoBuy;
 
   const plainSpin = plainSpinOnlyProfile(events);
   if (plainSpin) return plainSpin;
