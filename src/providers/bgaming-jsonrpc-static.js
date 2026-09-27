@@ -1125,6 +1125,29 @@ function dedupeModes(modes) {
   return out;
 }
 
+
+function plainSpinOnlyProfile(events) {
+  const purchaseMarkers = /purchased_feature|buy_bonus|buy_chance|buy_bonus_and_chance|purchaseFeature|buyFeature|buyBonus|bonus_buy|freespin_buy/i;
+
+  for (const source of responseSources(events)) {
+    if (!/\.(?:js|mjs)(?:\?|$)/i.test(source.url || '')) continue;
+    if (!/network\.invoke\(["']play["']/.test(source.body)) continue;
+    if (!/custom_field\s*:\s*["']custom_value["']/.test(source.body)) continue;
+    if (purchaseMarkers.test(source.body)) continue;
+
+    return {
+      source:'client_static_plain_spin_only',
+      catalog_complete:true,
+      wire_complete:true,
+      request_shape:['bet','bet_type','custom_field','fe_exponent'],
+      modes:[],
+      evidence_urls:[source.url],
+    };
+  }
+
+  return null;
+}
+
 function profileScore(profile) {
   if (!profile) return -1;
   return (
@@ -1145,7 +1168,12 @@ export function extractBgamingJsonRpcStaticProfile(events) {
   }
 
   candidates.sort((a, b) => profileScore(b) - profileScore(a));
-  return candidates[0] || {
+  if (candidates.length) return candidates[0];
+
+  const plainSpin = plainSpinOnlyProfile(events);
+  if (plainSpin) return plainSpin;
+
+  return {
     source:null,
     catalog_complete:false,
     wire_complete:false,
