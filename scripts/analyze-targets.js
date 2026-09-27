@@ -20,6 +20,7 @@ import {
   extractBgamingJsonRpcInit,
   extractBgamingUnrecognizedInit,
   summarizeBgamingBootstrap,
+  summarizeBgamingAllLuckyCloverLauncher,
   summarizeBgamingJsonRpcInit,
   bgamingNeedsReview,
   bgamingReviewReasons,
@@ -319,6 +320,29 @@ async function discover(service, url) {
       const unrecognizedInit = extractBgamingUnrecognizedInit(finalEvents);
       const pageTitle = await internal.page.title().catch(() => '');
       const finalUrl = internal.page.url();
+
+      if (
+        /\/play\/AllLuckyClover\//i.test(url) &&
+        unrecognizedInit &&
+        unrecognizedInit.body &&
+        Object.hasOwn(unrecognizedInit.body, 'wallet') &&
+        Object.hasOwn(unrecognizedInit.body, 'game')
+      ) {
+        const protocol = summarizeBgamingAllLuckyCloverLauncher();
+        return {
+          ok:true,
+          url,
+          provider:'bgaming',
+          client_family:'bgaming-legacy-fixed-lines',
+          status:'DISCOVERED',
+          duration_ms:Date.now() - started,
+          protocol,
+          review_reasons:[],
+          declared_features:[],
+          execution_blueprints:buildBgamingExecutionBlueprints(protocol),
+          bootstrap_endpoint:unrecognizedInit.request?.url || null,
+        };
+      }
 
       if (/^Page Not Found$/i.test(pageTitle.trim())) {
         return {
@@ -1541,6 +1565,7 @@ function buildBetCatalog(targets) {
         other_features: bg.other_features,
         bootstrap_maps: protocol.bootstrap_maps || [],
         purchased_feature_capabilities: bg.purchased_feature_capabilities || [],
+        line_variants: bg.line_variants || [],
         catalog_status:
           target.status === 'UNAVAILABLE_DEMO'
             ? 'UNAVAILABLE'
@@ -1612,6 +1637,7 @@ function buildBetCatalog(targets) {
       other_features: [],
       bootstrap_maps: [],
       purchased_feature_capabilities: [],
+      line_variants: [],
       catalog_status:
         target.provider === '3oaks' && target.ok && target.status === 'DISCOVERED'
           ? 'COMPLETE'
@@ -1649,6 +1675,7 @@ function catalogCsv(catalog) {
     'other_features',
     'bootstrap_maps',
     'purchased_feature_capabilities',
+    'line_variants',
   ];
 
   const rows = [columns.map(csvCell).join(',')];
