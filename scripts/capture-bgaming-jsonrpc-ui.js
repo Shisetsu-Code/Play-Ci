@@ -2,36 +2,36 @@ import fs from 'node:fs/promises';
 import { config } from '../src/config.js';
 import { BrowserService } from '../src/browser-service.js';
 import { extractBgamingJsonRpcInit } from '../src/providers/bgaming.js';
-import { extractBgamingJsonRpcStaticProfile } from '../src/providers/bgaming-jsonrpc-static.js';
 
 const games=[
-  'BlingBlitzDiamondDrop',
   'GrandPatron7rst',
-  'HotRocket532',
-  'JewelBoom',
-  'ZeusGoesWild',
+  'RecycleRiches',
+  'RocketEruptionTripleBlast',
+  'StarTrekNextGen',
+  'SweetSamurai',
+  'TheGodfather3PillarsOfPower',
 ];
-const service=new BrowserService({
-  ...config,
-  maxBodyBytes:20*1024*1024,
-  maxMemoryEvents:50000,
-});
+const terms=[
+  'round_mode_id','rmid','custom_req','buy_mode',
+  'isFeatureBuyFreeSpin','isFeatureBuyRespin',
+  'deep_spin','deep_bonanza','BUY_BONUS_COSTS',
+  'requestData','custom_field','purchaseFeaturesConfig',
+  'purchased_feature','buy_bonus','buy_chance',
+];
+const service=new BrowserService({...config,maxBodyBytes:20*1024*1024,maxMemoryEvents:50000});
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
-async function waitInit(internal,timeout=12000){
-  const deadline=Date.now()+timeout;
-  let best=null;
-  while(Date.now()<deadline){
-    const candidate=extractBgamingJsonRpcInit(internal.recorder.eventsAfter(0));
-    if(candidate)best=candidate;
-    if(candidate?.body?.result?.config?.bet_limits?.length) return candidate;
-    await sleep(200);
+function snippets(body,term,max=8){
+  const out=[];
+  const lower=body.toLowerCase(), needle=term.toLowerCase();
+  let from=0;
+  while(out.length<max){
+    const at=lower.indexOf(needle,from);
+    if(at<0)break;
+    out.push(body.slice(Math.max(0,at-900),Math.min(body.length,at+term.length+1800)).replace(/\s+/g,' '));
+    from=at+needle.length;
   }
-  return best;
-}
-
-function score(profile){
-  return (profile?.catalog_complete?1000:0)+(profile?.wire_complete?100:0)+(profile?.modes?.length||0)*10;
+  return out;
 }
 
 async function inspect(game){
@@ -39,23 +39,29 @@ async function inspect(game){
   const session=await service.createSession({url,skipSplash:false,captureInitialScreenshot:false});
   const internal=service.sessions.get(session.id);
   try{
-    const init=await waitInit(internal);
-    const deadline=Date.now()+8000;
-    let best=extractBgamingJsonRpcStaticProfile(internal.recorder.eventsAfter(0));
-    while(Date.now()<deadline && !best?.catalog_complete){
-      await sleep(300);
-      const p=extractBgamingJsonRpcStaticProfile(internal.recorder.eventsAfter(0));
-      if(score(p)>score(best))best=p;
+    await sleep(9000);
+    await internal.recorder.waitForQuiet({quietMs:500,timeoutMs:3000}).catch(()=>{});
+    const events=internal.recorder.eventsAfter(0);
+    const init=extractBgamingJsonRpcInit(events);
+    const hits=[];
+    for(const e of events){
+      if(e.type!=='responsebody'||typeof e.body!=='string'||e.body.length<80)continue;
+      if(!/\.(?:js|mjs|json)(?:\?|$)/i.test(e.url||''))continue;
+      const found=[];
+      for(const term of terms){
+        for(const snippet of snippets(e.body,term)) found.push({term,snippet});
+      }
+      if(found.length) hits.push({url:e.url,found:found.slice(0,80)});
+      if(hits.length>=18)break;
     }
     return {
-      game,
-      init_found:Boolean(init),
-      bet_limits:init?.body?.result?.config?.bet_limits||[],
-      purchased_features:init?.body?.result?.config?.purchased_features||[],
-      profile:best,
+      game,url,ok:true,
+      endpoint:init?.request?.url||null,
+      config:init?.body?.result?.config||null,
+      hits,
     };
   }catch(error){
-    return {game,error:error.message};
+    return {game,url,ok:false,error:error.message,hits:[]};
   }finally{
     await service.closeSession(session.id).catch(()=>{});
   }
@@ -66,34 +72,22 @@ try{
   const results=[];
   for(const game of games){
     results.push(await inspect(game));
-    await sleep(300);
+    await sleep(250);
   }
   await fs.mkdir('artifacts/bg-jsonrpc-ui',{recursive:true});
-  await fs.writeFile('artifacts/bg-jsonrpc-ui/final-five-parser.json',JSON.stringify(results,null,2),'utf8');
-  await fs.writeFile('artifacts/bg-jsonrpc-ui/manifest.json',JSON.stringify(results.map(r=>({
-    game:r.game,
-    init_found:r.init_found||false,
-    bet_count:r.bet_limits?.length||0,
-    capability_count:r.purchased_features?.length||0,
-    profile_source:r.profile?.source||null,
-    catalog_complete:Boolean(r.profile?.catalog_complete),
-    wire_complete:Boolean(r.profile?.wire_complete),
-    modes:(r.profile?.modes||[]).map(m=>({
-      kind:m.kind,id:m.id,feature:m.feature,multiplier:m.multiplier,
-      wire_complete:m.wire_complete,
+  await fs.writeFile('artifacts/bg-jsonrpc-ui/final-wire-sources.json',JSON.stringify(results,null,2),'utf8');
+  console.log(JSON.stringify(results.map(r=>({
+    game:r.game,ok:r.ok,endpoint:r.endpoint,
+    config:r.config?{
+      default_bet:r.config.default_bet,
+      bet_limits:r.config.bet_limits,
+      purchased_features:r.config.purchased_features,
+    }:null,
+    sources:r.hits.map(s=>({
+      url:s.url,
+      terms:[...new Set(s.found.map(x=>x.term))],
+      snippets:s.found.slice(0,24),
     })),
     error:r.error||null,
-  })),null,2),'utf8');
-  console.log(JSON.stringify(results.map(r=>({
-    game:r.game,
-    init_found:r.init_found||false,
-    bet_count:r.bet_limits?.length||0,
-    profile_source:r.profile?.source||null,
-    catalog_complete:Boolean(r.profile?.catalog_complete),
-    wire_complete:Boolean(r.profile?.wire_complete),
-    modes:(r.profile?.modes||[]).map(m=>[m.kind,m.id,m.feature,m.multiplier,m.wire_complete]),
-    error:r.error||null,
   })),null,2));
-}finally{
-  await service.stop();
-}
+}finally{await service.stop()}
