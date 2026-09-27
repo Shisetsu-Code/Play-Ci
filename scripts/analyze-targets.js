@@ -27,6 +27,9 @@ import {
   bgamingCatalog,
 } from '../src/providers/bgaming.js';
 import {
+  extractBgamingJsonRpcStaticProfile,
+} from '../src/providers/bgaming-jsonrpc-static.js';
+import {
   waitForThreeOaksCapability,
   dismissThreeOaksStart as dismissThreeOaksRuntimeStart,
   invokeThreeOaksTask,
@@ -260,9 +263,12 @@ async function discover(service, url) {
 
     if (bgStart || bgJsonRpc) {
       const source = bgStart || bgJsonRpc;
+      const staticProfile = bgJsonRpc
+        ? extractBgamingJsonRpcStaticProfile(internal.recorder.eventsAfter(0))
+        : null;
       const protocol = bgStart
         ? summarizeBgamingBootstrap(bgStart)
-        : summarizeBgamingJsonRpcInit(bgJsonRpc);
+        : summarizeBgamingJsonRpcInit(bgJsonRpc, staticProfile);
       const reviewReasons = bgamingReviewReasons(protocol);
       return {
         ok: true,
@@ -1666,7 +1672,13 @@ const targetText = await fs.readFile(TARGET_FILE, 'utf8');
 const urls = parseTargetList(targetText);
 if (urls.length === 0) throw new Error(`No targets found in ${TARGET_FILE}`);
 
-const service = new BrowserService(config);
+const service = new BrowserService({
+  ...config,
+  // JSON-RPC clients often embed game-specific wager declarations inside
+  // multi-megabyte JS bundles. Keep enough response body to inspect them.
+  maxBodyBytes: Math.max(config.maxBodyBytes, 12 * 1024 * 1024),
+  maxMemoryEvents: Math.max(config.maxMemoryEvents, 30000),
+});
 await service.start();
 
 try {
