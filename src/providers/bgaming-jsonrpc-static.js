@@ -743,6 +743,116 @@ function sweetSamuraiModes(source, sourceUrl) {
   };
 }
 
+
+function mysticReelsModes(source, sourceUrl) {
+  if (!/RESPIN_BUY/.test(source) || !/BONUS_BUY/.test(source)) return null;
+  if (!/request\.bet\s*=\s*\(request\.bet\s*\*\s*2\)\s*\/\s*3/.test(source)) return null;
+  if (!/request\.bet\s*\/=\s*100/.test(source)) return null;
+  if (!/RESPIN_BUY["']?\s*:\s*return\s*["']buy_chance["']/.test(source) &&
+      !/case\s*["']RESPIN_BUY["']\s*:\s*return\s*["']buy_chance["']/.test(source)) return null;
+  if (!/case\s*["']BONUS_BUY["']\s*:\s*return\s*["']buy_bonus["']/.test(source)) return null;
+
+  return {
+    source:'client_static_mode_transform',
+    catalog_complete:true,
+    wire_complete:true,
+    request_shape:['purchased_feature','bet_transform'],
+    modes:[
+      {
+        kind:'booster',
+        feature:'buy_chance',
+        id:'respin_buy',
+        level:'respin_buy',
+        multiplier:1.5,
+        raw_value:1.5,
+        activation:true,
+        request_fields:{
+          bet:'<BASE_BET_SUBUNITS>',
+          purchased_feature:'buy_chance',
+        },
+        bet_transform:'visible_stake / 1.5',
+        wire_complete:true,
+        source:'client_static_mode_transform',
+        evidence_url:sourceUrl,
+      },
+      {
+        kind:'buy',
+        feature:'buy_bonus',
+        id:'bonus_buy',
+        level:'bonus_buy',
+        multiplier:100,
+        raw_value:100,
+        activation:false,
+        request_fields:{
+          bet:'<BASE_BET_SUBUNITS>',
+          purchased_feature:'buy_bonus',
+        },
+        bet_transform:'visible_stake / 100',
+        wire_complete:true,
+        source:'client_static_mode_transform',
+        evidence_url:sourceUrl,
+      },
+    ],
+    evidence_urls:[sourceUrl],
+  };
+}
+
+function clashOfGodsModes(source, sourceUrl) {
+  const values = source.match(
+    /buyBonusModeMultiplier1\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*this\.buyBonusModeMultiplier2\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*this\.businessmanModeMultiplier1\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*this\.businessmanModeMultiplier2\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*this\.businessmanModeMultiplier3\s*=\s*([0-9]+(?:\.[0-9]+)?)/
+  );
+  if (!values) return null;
+  if (!/feature_buy\s*:/.test(source) || !/buyBonusModeMultiplier\s*:/.test(source)) return null;
+  if (!/ante_0=["']ante_0["']/.test(source) || !/ante_1=["']ante_1["']/.test(source) || !/ante_2=["']ante_2["']/.test(source)) return null;
+  if (!/buy_bonus=["']buy_bonus["']/.test(source) || !/super_buy_bonus=["']super_buy_bonus["']/.test(source)) return null;
+
+  const buy1 = Number(values[1]);
+  const buy2 = Number(values[2]);
+  const ante1 = Number(values[3]);
+  const ante0 = Number(values[4]);
+  const ante2 = Number(values[5]);
+
+  const common = {
+    bet_type:'default',
+    fe_exponent:'<FE_EXPONENT>',
+    bonus_type:'<BONUS_TYPE>',
+  };
+
+  const modes = [
+    ['booster','buy_chance','ante_1',ante1,1],
+    ['booster','buy_chance','ante_0',ante0,1],
+    ['booster','buy_chance','ante_2',ante2,1],
+    ['buy','buy_bonus','buy_bonus',buy1,buy1],
+    ['buy','buy_bonus','super_buy_bonus',buy2,buy2],
+  ].map(([kind, feature, id, multiplier, buyBonusModeMultiplier]) => ({
+    kind,
+    feature,
+    id,
+    level:id,
+    multiplier:Number(multiplier),
+    raw_value:Number(multiplier),
+    activation:kind === 'booster',
+    request_fields:{
+      ...common,
+      feature_buy:id,
+      purchased_feature:feature,
+      buyBonusModeMultiplier:Number(buyBonusModeMultiplier),
+    },
+    wire_complete:true,
+    source:'client_static_feature_buy_map',
+    evidence_url:sourceUrl,
+  }));
+
+  return {
+    source:'client_static_feature_buy_map',
+    catalog_complete:true,
+    wire_complete:true,
+    request_shape:['feature_buy','purchased_feature','buyBonusModeMultiplier','bonus_type','fe_exponent'],
+    modes,
+    evidence_urls:[sourceUrl],
+  };
+}
+
 function dedupeModes(modes) {
   const seen = new Set();
   const out = [];
@@ -773,7 +883,7 @@ export function extractBgamingJsonRpcStaticProfile(events) {
   const candidates = [];
 
   for (const source of responseSources(events)) {
-    for (const extractor of [bigBucksModes, blazingFirepotsModes, sweetSamuraiModes, yommiFeatureModes, fsMultiplierBuyMode, jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
+    for (const extractor of [mysticReelsModes, clashOfGodsModes, bigBucksModes, blazingFirepotsModes, sweetSamuraiModes, yommiFeatureModes, fsMultiplierBuyMode, jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
       const profile = extractor(source.body, source.url);
       if (profile) candidates.push(profile);
     }
