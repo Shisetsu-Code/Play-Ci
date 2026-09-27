@@ -492,7 +492,7 @@ function bonusMultiplierModes(source, sourceUrl) {
 
   if (
     Number.isFinite(chanceMultiplier) &&
-    /purchased_feature\s*:\s*[^,;?]*["']buy_chance["']/.test(source)
+    /purchased_feature[^;}]{0,320}["']buy_chance["']/.test(source)
   ) {
     modes.unshift({
       kind:'booster',
