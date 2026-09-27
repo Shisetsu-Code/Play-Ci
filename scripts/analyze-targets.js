@@ -1764,8 +1764,44 @@ const service = new BrowserService({
 });
 await service.start();
 
+function hasReviewReason(target, code) {
+  return (target?.review_reasons || []).some((reason) => reason?.code === code);
+}
+
+async function retryBgamingBootstrapMisses(service, discoveries) {
+  const out = [...discoveries];
+  const indexes = out
+    .map((target, index) => ({target, index}))
+    .filter(({target}) =>
+      target?.provider === 'bgaming' &&
+      target?.status === 'REQUIRES_REVIEW' &&
+      hasReviewReason(target, 'BGAMING_BOOTSTRAP_MISSING')
+    );
+
+  for (const {target, index} of indexes) {
+    let best = target;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await sleep(750);
+      const retry = await discover(service, target.url);
+      if (
+        retry?.status === 'DISCOVERED' ||
+        retry?.status === 'UNAVAILABLE_DEMO' ||
+        (retry?.protocol && !hasReviewReason(retry, 'BGAMING_BOOTSTRAP_MISSING'))
+      ) {
+        best = retry;
+        break;
+      }
+      best = retry?.ok ? retry : best;
+    }
+    out[index] = best;
+  }
+
+  return out;
+}
+
 try {
-  const discoveries = await pool(urls, DISCOVERY_CONCURRENCY, (url) => discover(service, url));
+  const initialDiscoveries = await pool(urls, DISCOVERY_CONCURRENCY, (url) => discover(service, url));
+  const discoveries = await retryBgamingBootstrapMisses(service, initialDiscoveries);
   const groups = validationGroups(discoveries);
   const adaptive = await runAdaptiveValidation(service, groups);
   const validations = adaptive.results;
