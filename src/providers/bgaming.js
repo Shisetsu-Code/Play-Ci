@@ -482,22 +482,27 @@ export function buildBgamingExecutionBlueprints(protocol) {
     }];
 
     for (const mode of protocol?.special_modes || []) {
-      const requestFields = mode.request_fields && typeof mode.request_fields === 'object'
+      const hasRequestFields = mode.request_fields && typeof mode.request_fields === 'object';
+      const requestFields = hasRequestFields
         ? mode.request_fields
-        : {purchased_feature:mode.feature};
-      const requestTemplate = {
-        jsonrpc:'2.0',
-        method:'play',
-        id:'<REQUEST_ID>',
-        params:{
-          token:'<SESSION_TOKEN>',
-          state_lock:'<STATE_LOCK>',
-          req:{
-            bet:'<BET_SUBUNITS>',
-            ...requestFields,
-          },
-        },
-      };
+        : mode.wire_complete === false
+          ? null
+          : {purchased_feature:mode.feature};
+      const requestTemplate = requestFields
+        ? {
+            jsonrpc:'2.0',
+            method:'play',
+            id:'<REQUEST_ID>',
+            params:{
+              token:'<SESSION_TOKEN>',
+              state_lock:'<STATE_LOCK>',
+              req:{
+                bet:'<BET_SUBUNITS>',
+                ...requestFields,
+              },
+            },
+          }
+        : null;
 
       out.push({
         kind:mode.kind,
