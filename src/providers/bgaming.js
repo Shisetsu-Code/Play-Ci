@@ -440,6 +440,14 @@ export function bgamingReviewReasons(protocol) {
         level:mode.level,
       });
     }
+    if (protocol?.generation === 'jsonrpc' && mode.wire_complete === false) {
+      reasons.push({
+        code:'JSONRPC_SPECIAL_MODE_WIRE_UNRESOLVED',
+        feature:mode.feature,
+        level:mode.level,
+        wire_requirements:mode.wire_requirements || [],
+      });
+    }
   }
   return reasons;
 }
