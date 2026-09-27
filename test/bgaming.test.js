@@ -338,3 +338,33 @@ test('prefers complete BGaming JSONRPC init over earlier partial init', () => {
   assert.equal(JSON.parse(start.request.postData).id,'full');
   assert.deepEqual(start.body.result.config.bet_limits,[20,100,500]);
 });
+
+
+test('JSONRPC special modes with unresolved wire remain under review', () => {
+  const p=summarizeBgamingJsonRpcInit({
+    body:{jsonrpc:'2.0',result:{
+      currency_attributes:{code:'FUN',subunits:100},
+      config:{bet_limits:[20,100],default_bet:20,purchased_features:['buy_bonus']},
+    }},
+    request:null,
+  }, {
+    source:'client_static_purchase_config',
+    catalog_complete:true,
+    wire_complete:false,
+    request_shape:['custom_field'],
+    evidence_urls:['https://game/main.js'],
+    modes:[{
+      kind:'buy',
+      feature:'buy_bonus',
+      id:'buy_random',
+      level:'buy_random',
+      multiplier:100,
+      request_fields:{purchased_feature:'buy_bonus',custom_field:'buy_random'},
+      wire_complete:false,
+      wire_requirements:['requestData','bet_type'],
+      source:'client_static_purchase_config',
+    }],
+  });
+  assert.equal(bgamingNeedsReview(p),true);
+  assert.ok(bgamingReviewReasons(p).some(x=>x.code==='JSONRPC_SPECIAL_MODE_WIRE_UNRESOLVED'));
+});
