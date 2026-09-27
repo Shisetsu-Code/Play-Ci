@@ -620,13 +620,14 @@ function fsMultiplierBuyMode(source, sourceUrl) {
 
 
 function bigBucksModes(source, sourceUrl) {
-  const multiplierMatch = source.match(/\bbuyBonusMultiplier\s*=\s*([0-9]+(?:\.[0-9]+)?)/);
-  if (!multiplierMatch) return null;
+  const assignments = [...source.matchAll(/\bbuyBonusMultiplier\s*=\s*([0-9]+(?:\.[0-9]+)?)/g)]
+    .map((match) => Number(match[1]))
+    .filter((value) => Number.isFinite(value) && value > 1);
+  if (!assignments.length) return null;
   if (!/purchased_feature\s*:\s*["']buy_bonus["']/.test(source)) return null;
   if (!/bonusPrices\.freespin_buy/.test(source)) return null;
 
-  const multiplier = Number(multiplierMatch[1]);
-  if (!Number.isFinite(multiplier) || multiplier <= 1) return null;
+  const multiplier = Math.max(...assignments);
 
   return {
     source:'client_static_buy_bonus_multiplier',
