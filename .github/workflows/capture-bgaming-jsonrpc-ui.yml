@@ -1,7 +1,12 @@
 name: Capture BGaming JSONRPC UI
 
 on:
-  pull_request:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/playwright-visual-probe
+    paths:
+      - analysis/capture-trigger.txt
 
 permissions:
   contents: read
@@ -23,4 +28,4 @@ jobs:
         with:
           name: bgaming-jsonrpc-ui
           path: artifacts/bg-jsonrpc-ui/
-          retention-days: 1
+          retention-days: 7
