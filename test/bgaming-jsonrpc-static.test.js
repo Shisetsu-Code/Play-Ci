@@ -350,3 +350,21 @@ test('extracts RedHotChilliChickens normal and super bonus buys', () => {
   );
   assert.equal(profile.modes[0].request_fields.bet_type,'betting');
 });
+
+
+test('extracts JokerVsJoker businessman and buy-bonus modes', () => {
+  const source=[
+    'class G{constructor(){this.businessmanMode=!1,this.busnesssmanModeMultiplier=10,this.buyBonusModeMultiplier=60}}',
+    'function spin(e){e=e||(global.businessmanMode?"buy_chance":null);let n="default",r=1;"buy_bonus"==e&&(r=global.buyBonusModeMultiplier);',
+    'return network.invoke("play",{req:{bet:100,bet_type:n,fe_exponent:global.feBetExponent,purchased_feature:e,balance:global.balance,buyBonusModeMultiplier:r}})}',
+  ].join('');
+  const profile=extractBgamingJsonRpcStaticProfile([jsEvent(source)]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.deepEqual(
+    profile.modes.map(x=>[x.id,x.feature,x.multiplier]),
+    [['businessman_mode','buy_chance',10],['buy_bonus','buy_bonus',60]],
+  );
+  assert.equal(profile.modes[0].request_fields.buyBonusModeMultiplier,1);
+  assert.equal(profile.modes[1].request_fields.buyBonusModeMultiplier,60);
+});
