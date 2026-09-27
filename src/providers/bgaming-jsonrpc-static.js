@@ -1,0 +1,327 @@
+function responseSources(events) {
+  return (events || [])
+    .filter((event) =>
+      event?.type === 'responsebody' &&
+      typeof event.body === 'string' &&
+      event.body.length >= 500 &&
+      /\.(?:js|mjs)(?:\?|$)/i.test(event.url || '')
+    )
+    .map((event) => ({url:event.url || '', body:event.body}));
+}
+
+function literalValue(token, constants, depth = 0) {
+  if (token == null || depth > 4) return null;
+  const value = String(token).trim();
+
+  if (/^".*"$/.test(value)) {
+    try { return JSON.parse(value); } catch { return value.slice(1, -1); }
+  }
+  if (/^'.*'$/.test(value)) return value.slice(1, -1);
+  if (/^-?\d+(?:\.\d+)?$/.test(value)) return Number(value);
+  if (value === 'true' || value === '!0') return true;
+  if (value === 'false' || value === '!1') return false;
+
+  if (/^[A-Za-z_$][\w$]*$/.test(value) && constants.has(value)) {
+    return literalValue(constants.get(value), constants, depth + 1);
+  }
+  return null;
+}
+
+function simpleConstants(source) {
+  const constants = new Map();
+  const assignment = /(?:\b(?:const|let|var)\s+|,)([A-Za-z_$][\w$]*)\s*=\s*("(?:\\.|[^"])*"|'(?:\\.|[^'])*'|-?\d+(?:\.\d+)?)(?=\s*[,;])/g;
+
+  for (const match of source.matchAll(assignment)) {
+    constants.set(match[1], match[2]);
+  }
+  return constants;
+}
+
+function fieldToken(objectText, key) {
+  const token = '(?:"(?:\\\\.|[^"])*"|\'(?:\\\\.|[^\'])*\'|-?\\d+(?:\\.\\d+)?|!0|!1|true|false|[A-Za-z_$][\\w$]*)';
+  const re = new RegExp('\\b' + key + '\\s*:\\s*(' + token + ')');
+  return objectText.match(re)?.[1] ?? null;
+}
+
+function modeKind(feature, activation) {
+  const name = String(feature || '').toLowerCase();
+  if (name === 'buy_chance') return 'booster';
+  if (activation === true && name.includes('chance')) return 'booster';
+  return 'buy';
+}
+
+function sourceRequestSecondaryKey(source) {
+  const candidates = new Map();
+  const objectRe = /\{[^{}]{0,900}\bpurchased_feature\s*:[^{}]{0,900}\}/g;
+  const keys = [
+    'buy_id',
+    'bonus_buy',
+    'custom_field',
+    'feature_id',
+    'buy_feature_id',
+    'bonus_multiplier_type',
+    'machineId',
+  ];
+
+  for (const match of source.matchAll(objectRe)) {
+    const text = match[0];
+    for (const key of keys) {
+      if (new RegExp('\\b' + key + '\\s*:').test(text)) {
+        candidates.set(key, (candidates.get(key) || 0) + 1);
+      }
+    }
+  }
+
+  return [...candidates.entries()]
+    .sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+}
+
+function shopModes(source, sourceUrl) {
+  if (!/\bpurchaseFeature\s*:/.test(source)) return null;
+
+  const constants = simpleConstants(source);
+  const secondaryKey = sourceRequestSecondaryKey(source);
+  const modes = [];
+  const objectRe = /\{[^{}]{0,1900}\bpurchaseFeature\s*:\s*(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[A-Za-z_$][\w$]*)[^{}]{0,1900}\}/g;
+
+  for (const match of source.matchAll(objectRe)) {
+    const text = match[0];
+    const feature = literalValue(fieldToken(text, 'purchaseFeature'), constants);
+    const id = literalValue(fieldToken(text, 'id'), constants);
+    const price = literalValue(fieldToken(text, 'price'), constants);
+    const activation = literalValue(fieldToken(text, 'activation'), constants);
+
+    if (typeof feature !== 'string' || typeof id !== 'string' || !Number.isFinite(Number(price))) {
+      continue;
+    }
+    if (!/^buy_|^bonus_|^freespin_/i.test(feature)) continue;
+
+    const requestFields = {purchased_feature:feature};
+    if (secondaryKey) requestFields[secondaryKey] = id;
+
+    modes.push({
+      kind:modeKind(feature, activation),
+      feature,
+      id,
+      level:id,
+      multiplier:Number(price),
+      raw_value:Number(price),
+      activation:activation === true,
+      request_fields:requestFields,
+      wire_complete:Boolean(secondaryKey),
+      source:'client_static_shop',
+      evidence_url:sourceUrl,
+    });
+  }
+
+  const unique = dedupeModes(modes);
+  if (!unique.length) return null;
+
+  return {
+    source:'client_static_shop',
+    catalog_complete:true,
+    wire_complete:Boolean(secondaryKey),
+    request_shape:secondaryKey ? [secondaryKey] : [],
+    modes:unique,
+    evidence_urls:[sourceUrl],
+  };
+}
+
+function configuredModes(source, sourceUrl) {
+  if (!/purchaseFeaturesConfig\s*:/.test(source)) return null;
+
+  const modes = [];
+  const objectRe = /\{[^{}]{0,1800}(?:configFeatureType|betPriceMultiplier)\s*:[^{}]{0,1800}\}/g;
+  for (const match of source.matchAll(objectRe)) {
+    const text = match[0];
+    const id = literalValue(fieldToken(text, 'id'), new Map());
+    const type = literalValue(fieldToken(text, 'type'), new Map());
+    const price = literalValue(
+      fieldToken(text, 'price') ?? fieldToken(text, 'betPriceMultiplier'),
+      new Map(),
+    );
+
+    if (typeof id !== 'string' || typeof type !== 'string' || !Number.isFinite(Number(price))) {
+      continue;
+    }
+    if (!/^buy_/i.test(type)) continue;
+
+    modes.push({
+      kind:modeKind(type, true),
+      feature:type,
+      id,
+      level:id,
+      multiplier:Number(price),
+      raw_value:Number(price),
+      activation:type === 'buy_chance',
+      request_fields:{
+        purchased_feature:type,
+        custom_field:id,
+      },
+      wire_complete:false,
+      wire_requirements:['requestData', 'bet_type'],
+      source:'client_static_purchase_config',
+      evidence_url:sourceUrl,
+    });
+  }
+
+  const unique = dedupeModes(modes);
+  if (!unique.length) return null;
+
+  return {
+    source:'client_static_purchase_config',
+    catalog_complete:true,
+    wire_complete:false,
+    request_shape:['custom_field'],
+    modes:unique,
+    evidence_urls:[sourceUrl],
+  };
+}
+
+function chickenModes(source, sourceUrl) {
+  if (!/feature_id\s*:/.test(source)) return null;
+
+  const prices = source.match(
+    /\{\s*buy_bonus\s*:\s*([0-9.]+)\s*,\s*buy_super_bonus\s*:\s*([0-9.]+)\s*,\s*buy_ultra_bonus\s*:\s*([0-9.]+)\s*\}/
+  );
+  if (!prices) return null;
+
+  const constants = simpleConstants(source);
+  const chanceReturn = source.match(
+    /if\(\s*["']buy_chance["']\s*===\s*[A-Za-z_$][\w$]*\s*\)\s*return\s+([A-Za-z_$][\w$]*|[0-9.]+)/
+  );
+  const chanceMultiplier = chanceReturn
+    ? literalValue(chanceReturn[1], constants)
+    : null;
+
+  const modes = [
+    ...(Number.isFinite(Number(chanceMultiplier)) ? [{
+      kind:'booster',
+      feature:'buy_chance',
+      id:'buy_chance',
+      level:'buy_chance',
+      multiplier:Number(chanceMultiplier),
+      raw_value:Number(chanceMultiplier),
+      activation:true,
+      request_fields:{purchased_feature:'buy_chance', bet_type:'bet'},
+      wire_complete:true,
+      source:'client_static_feature_map',
+      evidence_url:sourceUrl,
+    }] : []),
+    ...[
+      ['buy_bonus', Number(prices[1])],
+      ['buy_super_bonus', Number(prices[2])],
+      ['buy_ultra_bonus', Number(prices[3])],
+    ].map(([id, multiplier]) => ({
+      kind:'buy',
+      feature:'buy_bonus',
+      id,
+      level:id,
+      multiplier,
+      raw_value:multiplier,
+      activation:false,
+      request_fields:{
+        purchased_feature:'buy_bonus',
+        feature_id:id,
+        bet_type:'bet',
+      },
+      wire_complete:true,
+      source:'client_static_feature_map',
+      evidence_url:sourceUrl,
+    })),
+  ];
+
+  return {
+    source:'client_static_feature_map',
+    catalog_complete:modes.length === 4,
+    wire_complete:true,
+    request_shape:['feature_id'],
+    modes,
+    evidence_urls:[sourceUrl],
+  };
+}
+
+function treasureModes(source, sourceUrl) {
+  const prices = source.match(
+    /\{\s*buy_chance\s*:\s*([0-9.]+)\s*,\s*buy_bonus\s*:\s*([0-9.]+)\s*,\s*buy_bonus_and_chance\s*:\s*([0-9.]+)\s*\}/
+  );
+  if (!prices || !/\bmachineId\s*:/.test(source)) return null;
+
+  const machine = source.match(/\bmachineId\s*:\s*["'](\d+)["']/);
+  if (!machine) return null;
+  const machineId = Number(machine[1]);
+
+  const definitions = [
+    ['buy_chance', Number(prices[1])],
+    ['buy_bonus', Number(prices[2])],
+    ['buy_bonus_and_chance', Number(prices[3])],
+  ];
+
+  return {
+    source:'client_static_machine_profile',
+    catalog_complete:true,
+    wire_complete:true,
+    request_shape:['machineId'],
+    modes:definitions.map(([feature, multiplier]) => ({
+      kind:feature === 'buy_chance' ? 'booster' : 'buy',
+      feature,
+      id:feature,
+      level:feature,
+      multiplier,
+      raw_value:multiplier,
+      activation:feature === 'buy_chance',
+      request_fields:{purchased_feature:feature, machineId},
+      wire_complete:true,
+      source:'client_static_machine_profile',
+      evidence_url:sourceUrl,
+    })),
+    evidence_urls:[sourceUrl],
+  };
+}
+
+function dedupeModes(modes) {
+  const seen = new Set();
+  const out = [];
+  for (const mode of modes) {
+    const key = JSON.stringify([
+      mode.feature,
+      mode.id,
+      mode.multiplier,
+      mode.request_fields,
+    ]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(mode);
+  }
+  return out;
+}
+
+function profileScore(profile) {
+  if (!profile) return -1;
+  return (
+    (profile.catalog_complete ? 100 : 0) +
+    (profile.wire_complete ? 20 : 0) +
+    (profile.modes?.length || 0)
+  );
+}
+
+export function extractBgamingJsonRpcStaticProfile(events) {
+  const candidates = [];
+
+  for (const source of responseSources(events)) {
+    for (const extractor of [configuredModes, chickenModes, treasureModes, shopModes]) {
+      const profile = extractor(source.body, source.url);
+      if (profile) candidates.push(profile);
+    }
+  }
+
+  candidates.sort((a, b) => profileScore(b) - profileScore(a));
+  return candidates[0] || {
+    source:null,
+    catalog_complete:false,
+    wire_complete:false,
+    request_shape:[],
+    modes:[],
+    evidence_urls:[],
+  };
+}
