@@ -438,3 +438,30 @@ test('detects a direct BGaming client with base-spin-only wire', () => {
   assert.equal(profile.source,'client_static_plain_spin_only');
   assert.deepEqual(profile.modes,[]);
 });
+
+
+test('detects OGA client with no game-specific feature-buy definition', () => {
+  const events=[
+    jsonEvent({
+      oga:{game:{name:'jewelboomtest',version:'1.0.0'}},
+      engine:{definition:{gameVersion:'1.0.0',stakeMul:1,jackpots:{mini:25}}},
+    }, 'https://game.demo.bgaming-network.com/game/definitions.json'),
+    jsonEvent({
+      autoplay:{onBonusFeature:false},
+      components:{infoBar:true},
+    }, 'https://game.demo.bgaming-network.com/gameConfig.json'),
+    jsEvent([
+      'function doGameAction(t){',
+      'return t.buyFeature&&(t.formattedRequest.params.isFeatureBuyRespin?',
+      'this.definitionsGameData.engine.definition.featureBuyMulRespin:',
+      't.formattedRequest.params.isFeatureBuyFreeSpin&&',
+      'this.definitionsGameData.engine.definition.featureBuyMulFreespin)}',
+    ].join(''), 'https://game.demo.bgaming-network.com/client.min.js'),
+    jsEvent('class Game{spin(){return this.engine.spin()}}', 'https://game.demo.bgaming-network.com/game/game.min.js'),
+  ];
+  const profile=extractBgamingJsonRpcStaticProfile(events);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.equal(profile.source,'client_oga_no_feature_buy_definition');
+  assert.deepEqual(profile.modes,[]);
+});
