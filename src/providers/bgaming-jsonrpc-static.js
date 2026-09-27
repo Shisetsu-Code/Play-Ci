@@ -525,6 +525,99 @@ function bonusMultiplierModes(source, sourceUrl) {
   };
 }
 
+
+function yommiFeatureModes(source, sourceUrl) {
+  if (!/FEATURE_BET_MULTIPLIER/.test(source) || !/PURCHASED_FEATURES/.test(source)) return null;
+
+  const prices = source.match(
+    /FEATURE_BET_MULTIPLIER\s*=\s*[^;]{0,1200}?BONUS\s*,\s*(\d+)n?[^;]{0,600}?SUPER_BONUS\s*,\s*(\d+)n?[^;]{0,600}?MORE_PETS\s*,\s*(\d+)n?/
+  );
+  if (!prices) return null;
+
+  const mappings = {
+    MORE_PETS:'buy_chance',
+    BONUS:'buy_bonus',
+    SUPER_BONUS:'buy_bonus_and_chance',
+  };
+  const values = {
+    BONUS:Number(prices[1]),
+    SUPER_BONUS:Number(prices[2]),
+    MORE_PETS:Number(prices[3]),
+  };
+  const hasModelRev = /\bmodelRev\b/.test(source);
+  const hasMinExponent = /\bminExponent\b/.test(source);
+
+  const modes = ['MORE_PETS','BONUS','SUPER_BONUS'].map((id) => {
+    const feature = mappings[id];
+    const request_fields = {
+      purchased_feature:feature,
+      bet_type:'bet',
+    };
+    if (hasModelRev) request_fields.modelRev = 0;
+    if (hasMinExponent) request_fields.minExponent = 2;
+    return {
+      kind:feature === 'buy_chance' ? 'booster' : 'buy',
+      feature,
+      id:id.toLowerCase(),
+      level:id.toLowerCase(),
+      multiplier:values[id],
+      raw_value:values[id],
+      activation:feature === 'buy_chance',
+      request_fields,
+      wire_complete:true,
+      source:'client_static_feature_multiplier_map',
+      evidence_url:sourceUrl,
+    };
+  });
+
+  return {
+    source:'client_static_feature_multiplier_map',
+    catalog_complete:true,
+    wire_complete:true,
+    request_shape:[
+      ...(hasModelRev ? ['modelRev'] : []),
+      ...(hasMinExponent ? ['minExponent'] : []),
+    ],
+    modes,
+    evidence_urls:[sourceUrl],
+  };
+}
+
+function fsMultiplierBuyMode(source, sourceUrl) {
+  const multiplierMatch = source.match(/\bfsMultiplier\s*=\s*([0-9]+(?:\.[0-9]+)?)/);
+  if (!multiplierMatch) return null;
+  if (!/purchasedFeatures\.some\([^)]*["']buy_bonus["']/.test(source)) return null;
+  if (!/purchased_feature/.test(source)) return null;
+
+  const multiplier = Number(multiplierMatch[1]);
+  if (!Number.isFinite(multiplier) || multiplier <= 1) return null;
+
+  const betType = /bet_type[^"']{0,120}["']default["']/.test(source) ? 'default' : 'bet';
+  return {
+    source:'client_static_fs_multiplier',
+    catalog_complete:true,
+    wire_complete:true,
+    request_shape:['purchased_feature','bet_type'],
+    modes:[{
+      kind:'buy',
+      feature:'buy_bonus',
+      id:'buy_bonus',
+      level:'buy_bonus',
+      multiplier,
+      raw_value:multiplier,
+      activation:false,
+      request_fields:{
+        purchased_feature:'buy_bonus',
+        bet_type:betType,
+      },
+      wire_complete:true,
+      source:'client_static_fs_multiplier',
+      evidence_url:sourceUrl,
+    }],
+    evidence_urls:[sourceUrl],
+  };
+}
+
 function dedupeModes(modes) {
   const seen = new Set();
   const out = [];
@@ -555,7 +648,7 @@ export function extractBgamingJsonRpcStaticProfile(events) {
   const candidates = [];
 
   for (const source of responseSources(events)) {
-    for (const extractor of [jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
+    for (const extractor of [yommiFeatureModes, fsMultiplierBuyMode, jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
       const profile = extractor(source.body, source.url);
       if (profile) candidates.push(profile);
     }
