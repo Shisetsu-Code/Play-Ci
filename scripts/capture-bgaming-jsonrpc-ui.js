@@ -1,88 +1,99 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import { config } from '../src/config.js';
 import { BrowserService } from '../src/browser-service.js';
+import { extractBgamingJsonRpcInit } from '../src/providers/bgaming.js';
+import { extractBgamingJsonRpcStaticProfile } from '../src/providers/bgaming-jsonrpc-static.js';
 
-const cases=[
-  {game:'BlingBlitzDiamondDrop', intro:[[820,380,900],[640,575,2500]]},
-  {game:'HotRocket532', intro:[[820,380,900],[640,575,2500]]},
-  {game:'JewelBoom', intro:[[820,380,900],[640,575,2500]]},
-  {game:'ZeusGoesWild', intro:[[820,380,900],[640,575,2500]]},
+const games=[
+  'BlingBlitzDiamondDrop',
+  'GrandPatron7rst',
+  'HotRocket532',
+  'JewelBoom',
+  'ZeusGoesWild',
 ];
-const service=new BrowserService({...config,maxBodyBytes:10*1024*1024,maxMemoryEvents:30000});
+const service=new BrowserService({
+  ...config,
+  maxBodyBytes:20*1024*1024,
+  maxMemoryEvents:50000,
+});
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
-async function state(page){
-  return page.evaluate(()=>({
-    url:location.href,
-    title:document.title,
-    bodyText:(document.body?.innerText||'').replace(/\s+/g,' ').trim().slice(0,3000),
-    canvases:[...document.querySelectorAll('canvas')].map(c=>{
-      const r=c.getBoundingClientRect();
-      return {width:c.width,height:c.height,rect:{x:r.x,y:r.y,width:r.width,height:r.height}};
-    }),
-  })).catch(error=>({error:error.message}));
+async function waitInit(internal,timeout=12000){
+  const deadline=Date.now()+timeout;
+  let best=null;
+  while(Date.now()<deadline){
+    const candidate=extractBgamingJsonRpcInit(internal.recorder.eventsAfter(0));
+    if(candidate)best=candidate;
+    if(candidate?.body?.result?.config?.bet_limits?.length) return candidate;
+    await sleep(200);
+  }
+  return best;
+}
+
+function score(profile){
+  return (profile?.catalog_complete?1000:0)+(profile?.wire_complete?100:0)+(profile?.modes?.length||0)*10;
+}
+
+async function inspect(game){
+  const url=`https://demo.bgaming-network.com/play/${game}/FUN?server=demo`;
+  const session=await service.createSession({url,skipSplash:false,captureInitialScreenshot:false});
+  const internal=service.sessions.get(session.id);
+  try{
+    const init=await waitInit(internal);
+    const deadline=Date.now()+8000;
+    let best=extractBgamingJsonRpcStaticProfile(internal.recorder.eventsAfter(0));
+    while(Date.now()<deadline && !best?.catalog_complete){
+      await sleep(300);
+      const p=extractBgamingJsonRpcStaticProfile(internal.recorder.eventsAfter(0));
+      if(score(p)>score(best))best=p;
+    }
+    return {
+      game,
+      init_found:Boolean(init),
+      bet_limits:init?.body?.result?.config?.bet_limits||[],
+      purchased_features:init?.body?.result?.config?.purchased_features||[],
+      profile:best,
+    };
+  }catch(error){
+    return {game,error:error.message};
+  }finally{
+    await service.closeSession(session.id).catch(()=>{});
+  }
 }
 
 await service.start();
 try{
-  const manifest=[];
-  for(const item of cases){
-    const url=`https://demo.bgaming-network.com/play/${item.game}/FUN?server=demo`;
-    const session=await service.createSession({url,skipSplash:false,captureInitialScreenshot:false});
-    const internal=service.sessions.get(session.id);
-    const dir=path.join('artifacts','bg-jsonrpc-ui',item.game);
-    await fs.mkdir(dir,{recursive:true});
-    try{
-      await sleep(7500);
-      let shot=await service.capture(session.id,'00-ready');
-      await fs.copyFile(path.resolve(shot.path),path.join(dir,'00-ready.png'));
-
-      for(const [x,y,wait] of item.intro){
-        await internal.page.mouse.click(x,y).catch(()=>{});
-        await sleep(wait);
-      }
-      await sleep(2000);
-      shot=await service.capture(session.id,'01-main');
-      await fs.copyFile(path.resolve(shot.path),path.join(dir,'01-main.png'));
-
-      // Capture one extra state after closing common intro/modal areas without wagering.
-      for(const [x,y,wait] of [[640,575,1000],[640,360,1000]]){
-        await internal.page.mouse.click(x,y).catch(()=>{});
-        await sleep(wait);
-      }
-      shot=await service.capture(session.id,'02-settled');
-      await fs.copyFile(path.resolve(shot.path),path.join(dir,'02-settled.png'));
-
-      const events=internal.recorder.eventsAfter(0);
-      const purchaseMarkers=[];
-      for(const e of events){
-        if(e.type!=='responsebody'||typeof e.body!=='string')continue;
-        if(!/\.(?:js|mjs|json)(?:\?|$)/i.test(e.url||''))continue;
-        const body=e.body;
-        const markers=[
-          'purchased_feature','buy_bonus','buy_chance','buy_bonus_and_chance',
-          'featureBuyMulFreespin','featureBuyMulRespin','purchaseFeaturesConfig',
-          'buyFeatureId','buy_feature_id','buy_id','bonus_buy'
-        ].filter(k=>body.includes(k));
-        if(markers.length)purchaseMarkers.push({url:e.url,markers});
-      }
-
-      manifest.push({
-        game:item.game,url,ok:true,
-        page_state:await state(internal.page),
-        purchase_marker_sources:purchaseMarkers.slice(0,30),
-      });
-    }catch(error){
-      manifest.push({game:item.game,url,ok:false,error:error.message});
-    }finally{
-      await service.closeSession(session.id).catch(()=>{});
-      await sleep(300);
-    }
+  const results=[];
+  for(const game of games){
+    results.push(await inspect(game));
+    await sleep(300);
   }
-  await fs.writeFile('artifacts/bg-jsonrpc-ui/manifest.json',JSON.stringify(manifest,null,2),'utf8');
-  console.log(JSON.stringify(manifest.map(x=>({
-    game:x.game,ok:x.ok,page_state:x.page_state,
-    purchase_marker_sources:x.purchase_marker_sources,error:x.error||null,
+  await fs.mkdir('artifacts/bg-jsonrpc-ui',{recursive:true});
+  await fs.writeFile('artifacts/bg-jsonrpc-ui/final-five-parser.json',JSON.stringify(results,null,2),'utf8');
+  await fs.writeFile('artifacts/bg-jsonrpc-ui/manifest.json',JSON.stringify(results.map(r=>({
+    game:r.game,
+    init_found:r.init_found||false,
+    bet_count:r.bet_limits?.length||0,
+    capability_count:r.purchased_features?.length||0,
+    profile_source:r.profile?.source||null,
+    catalog_complete:Boolean(r.profile?.catalog_complete),
+    wire_complete:Boolean(r.profile?.wire_complete),
+    modes:(r.profile?.modes||[]).map(m=>({
+      kind:m.kind,id:m.id,feature:m.feature,multiplier:m.multiplier,
+      wire_complete:m.wire_complete,
+    })),
+    error:r.error||null,
+  })),null,2),'utf8');
+  console.log(JSON.stringify(results.map(r=>({
+    game:r.game,
+    init_found:r.init_found||false,
+    bet_count:r.bet_limits?.length||0,
+    profile_source:r.profile?.source||null,
+    catalog_complete:Boolean(r.profile?.catalog_complete),
+    wire_complete:Boolean(r.profile?.wire_complete),
+    modes:(r.profile?.modes||[]).map(m=>[m.kind,m.id,m.feature,m.multiplier,m.wire_complete]),
+    error:r.error||null,
   })),null,2));
-}finally{await service.stop()}
+}finally{
+  await service.stop();
+}
