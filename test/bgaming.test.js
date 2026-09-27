@@ -298,3 +298,43 @@ test('JSONRPC unresolved catalog mode does not invent a request template', () =>
   assert.equal(blueprints[1].request_template,null);
   assert.equal(blueprints[1].unresolved_reason,'JSONRPC_WIRE_REQUIRES_GAME_CONTEXT');
 });
+
+
+test('prefers complete BGaming JSONRPC init over earlier partial init', () => {
+  const events=[
+    {
+      seq:1,type:'request',requestId:'p1',method:'POST',
+      url:'https://game.demo.bgaming-network.com/api',
+      postData:JSON.stringify({jsonrpc:'2.0',method:'init',id:'partial',params:{token:'t'}}),
+    },
+    {
+      seq:2,type:'responsebody',requestId:'p1',
+      url:'https://game.demo.bgaming-network.com/api',
+      body:JSON.stringify({jsonrpc:'2.0',id:'partial',result:{
+        config:{bet_limits:[]},
+      }}),
+    },
+    {
+      seq:3,type:'request',requestId:'p2',method:'POST',
+      url:'https://game.demo.bgaming-network.com/api',
+      postData:JSON.stringify({jsonrpc:'2.0',method:'init',id:'full',params:{token:'t'}}),
+    },
+    {
+      seq:4,type:'responsebody',requestId:'p2',
+      url:'https://game.demo.bgaming-network.com/api',
+      body:JSON.stringify({jsonrpc:'2.0',id:'full',result:{
+        balance:100000,
+        currency_attributes:{code:'FUN',subunits:100},
+        config:{
+          bet_limits:[20,100,500],
+          default_bet:100,
+          purchased_features:['buy_bonus'],
+        },
+      }}),
+    },
+  ];
+  const start=extractBgamingJsonRpcInit(events);
+  assert.ok(start);
+  assert.equal(JSON.parse(start.request.postData).id,'full');
+  assert.deepEqual(start.body.result.config.bet_limits,[20,100,500]);
+});
