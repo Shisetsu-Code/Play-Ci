@@ -914,6 +914,72 @@ function redHotChilliChickensModes(source, sourceUrl) {
   };
 }
 
+
+function jokerVsJokerModes(source, sourceUrl) {
+  const multipliers = source.match(
+    /busnesssmanModeMultiplier\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*this\.buyBonusModeMultiplier\s*=\s*([0-9]+(?:\.[0-9]+)?)/
+  );
+  if (!multipliers) return null;
+
+  if (!/businessmanMode\s*\?\s*["']buy_chance["']/.test(source)) return null;
+  if (!/["']buy_bonus["']\s*==\s*[A-Za-z_$][\w$]*/.test(source)) return null;
+  if (!/purchased_feature\s*:/.test(source) || !/buyBonusModeMultiplier\s*:/.test(source)) return null;
+
+  const booster = Number(multipliers[1]);
+  const buy = Number(multipliers[2]);
+  if (!Number.isFinite(booster) || !Number.isFinite(buy)) return null;
+
+  const common = {
+    bet_type:'default',
+    fe_exponent:'<FE_EXPONENT>',
+    balance:'<BALANCE>',
+  };
+
+  return {
+    source:'client_static_joker_mode_multipliers',
+    catalog_complete:true,
+    wire_complete:true,
+    request_shape:['purchased_feature','buyBonusModeMultiplier','fe_exponent','balance'],
+    modes:[
+      {
+        kind:'booster',
+        feature:'buy_chance',
+        id:'businessman_mode',
+        level:'businessman_mode',
+        multiplier:booster,
+        raw_value:booster,
+        activation:true,
+        request_fields:{
+          ...common,
+          purchased_feature:'buy_chance',
+          buyBonusModeMultiplier:1,
+        },
+        wire_complete:true,
+        source:'client_static_joker_mode_multipliers',
+        evidence_url:sourceUrl,
+      },
+      {
+        kind:'buy',
+        feature:'buy_bonus',
+        id:'buy_bonus',
+        level:'buy_bonus',
+        multiplier:buy,
+        raw_value:buy,
+        activation:false,
+        request_fields:{
+          ...common,
+          purchased_feature:'buy_bonus',
+          buyBonusModeMultiplier:buy,
+        },
+        wire_complete:true,
+        source:'client_static_joker_mode_multipliers',
+        evidence_url:sourceUrl,
+      },
+    ],
+    evidence_urls:[sourceUrl],
+  };
+}
+
 function dedupeModes(modes) {
   const seen = new Set();
   const out = [];
@@ -944,7 +1010,7 @@ export function extractBgamingJsonRpcStaticProfile(events) {
   const candidates = [];
 
   for (const source of responseSources(events)) {
-    for (const extractor of [redHotChilliChickensModes, mysticReelsModes, clashOfGodsModes, bigBucksModes, blazingFirepotsModes, sweetSamuraiModes, yommiFeatureModes, fsMultiplierBuyMode, jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
+    for (const extractor of [jokerVsJokerModes, redHotChilliChickensModes, mysticReelsModes, clashOfGodsModes, bigBucksModes, blazingFirepotsModes, sweetSamuraiModes, yommiFeatureModes, fsMultiplierBuyMode, jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
       const profile = extractor(source.body, source.url);
       if (profile) candidates.push(profile);
     }
