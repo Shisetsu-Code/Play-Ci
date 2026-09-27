@@ -980,6 +980,60 @@ function jokerVsJokerModes(source, sourceUrl) {
   };
 }
 
+
+function buyDisabledConfig(source, sourceUrl) {
+  let body;
+  try { body = JSON.parse(source); } catch { return null; }
+
+  const buyBtn = body?.bg_gaming?.buy_btn;
+  if (!(buyBtn === false || String(buyBtn).toLowerCase() === 'false')) return null;
+
+  return {
+    source:'client_json_buy_disabled',
+    catalog_complete:true,
+    wire_complete:true,
+    request_shape:[],
+    modes:[],
+    evidence_urls:[sourceUrl],
+  };
+}
+
+function jungleQueenModes(source, sourceUrl) {
+  const multiplier = source.match(/\bua\s*=\s*([0-9]+(?:\.[0-9]+)?)/);
+  if (!multiplier) return null;
+  if (!/const\s+[A-Za-z_$][\w$]*\s*=\s*["']buybonus["']\s*,\s*[A-Za-z_$][\w$]*\s*=\s*["']buybonus["']/.test(source)) return null;
+  if (!/purchased_feature\s*:\s*["']buy_bonus["']/.test(source)) return null;
+  if (!/action\s*:\s*[A-Za-z_$][\w$]*\s*,\s*id\s*:\s*[A-Za-z_$][\w$]*/.test(source)) return null;
+
+  const value = Number(multiplier[1]);
+  if (!Number.isFinite(value) || value <= 1) return null;
+
+  return {
+    source:'client_static_jungle_buy',
+    catalog_complete:true,
+    wire_complete:true,
+    request_shape:['action','id','purchased_feature'],
+    modes:[{
+      kind:'buy',
+      feature:'buy_bonus',
+      id:'buybonus',
+      level:'buybonus',
+      multiplier:value,
+      raw_value:value,
+      activation:false,
+      request_fields:{
+        action:'buybonus',
+        id:'buybonus',
+        purchased_feature:'buy_bonus',
+      },
+      wire_complete:true,
+      source:'client_static_jungle_buy',
+      evidence_url:sourceUrl,
+    }],
+    evidence_urls:[sourceUrl],
+  };
+}
+
 function dedupeModes(modes) {
   const seen = new Set();
   const out = [];
@@ -1010,7 +1064,7 @@ export function extractBgamingJsonRpcStaticProfile(events) {
   const candidates = [];
 
   for (const source of responseSources(events)) {
-    for (const extractor of [jokerVsJokerModes, redHotChilliChickensModes, mysticReelsModes, clashOfGodsModes, bigBucksModes, blazingFirepotsModes, sweetSamuraiModes, yommiFeatureModes, fsMultiplierBuyMode, jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
+    for (const extractor of [buyDisabledConfig, jungleQueenModes, jokerVsJokerModes, redHotChilliChickensModes, mysticReelsModes, clashOfGodsModes, bigBucksModes, blazingFirepotsModes, sweetSamuraiModes, yommiFeatureModes, fsMultiplierBuyMode, jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
       const profile = extractor(source.body, source.url);
       if (profile) candidates.push(profile);
     }
