@@ -248,3 +248,44 @@ test('extracts single buy mode from client fsMultiplier', () => {
     [['buy_bonus',50,'default']],
   );
 });
+
+
+test('extracts BigBucks single buy multiplier', () => {
+  const source=[
+    'class S{initBalance(t){this.buyBonusMultiplier=120}}',
+    'updateBonusPrice(){data.bonusPrices.freespin_buy=data.bet*this.buyBonusMultiplier}',
+    'buyBonus(){this.spin(!0,{purchased_feature:"buy_bonus"})}',
+  ].join('');
+  const profile=extractBgamingJsonRpcStaticProfile([jsEvent(source)]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.deepEqual(profile.modes.map(x=>[x.feature,x.multiplier]),[['buy_bonus',120]]);
+});
+
+test('extracts BlazingFirepots chance and bonus prices', () => {
+  const source=[
+    'updateBonusPrice(){const{wager:t}=state,e=formatMoney(100*t)}',
+    'setWager(t){this.value.text=formatCurrency(this.isAnteSpinActive?1.4*t:t)}',
+    'const a={method:"play",params:{req:{bet:Math.round(g*y),bet_type:"betting",purchased_feature:"buy_chance"}}};',
+    'const b={method:"play",params:{req:{bet:Math.round(g*y),bet_type:"betting",purchased_feature:"buy_bonus"}}};',
+  ].join('');
+  const profile=extractBgamingJsonRpcStaticProfile([jsEvent(source)]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.deepEqual(
+    profile.modes.map(x=>[x.feature,x.multiplier,x.request_fields.bet_type]),
+    [['buy_chance',1.4,'betting'],['buy_bonus',100,'betting']],
+  );
+});
+
+test('extracts SweetSamurai buy catalog without inventing wire', () => {
+  const source=[
+    'e("BUY_BONUS_COSTS",{DEEP_SPIN:100,DEEP_BONANZA:150});',
+    'e("BonusType",function(e){return e.DEEP_SPIN="deep_spin",e.DEEP_BONANZA="deep_bonanza",e}({}));',
+  ].join('');
+  const profile=extractBgamingJsonRpcStaticProfile([jsEvent(source)]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,false);
+  assert.deepEqual(profile.modes.map(x=>[x.id,x.multiplier]),[['deep_spin',100],['deep_bonanza',150]]);
+  assert.equal(profile.modes[0].request_fields,null);
+});
