@@ -3,51 +3,48 @@ import path from 'node:path';
 import { config } from '../src/config.js';
 import { BrowserService } from '../src/browser-service.js';
 
-const url='https://demo.bgaming-network.com/play/AllLuckyClover/FUN?server=demo';
-const modes=[
-  {lines:5,x:310,y:370},
-  {lines:20,x:530,y:370},
-  {lines:40,x:750,y:370},
-  {lines:100,x:970,y:370},
+const cases=[
+  {game:'BigBucksSaloon',steps:[]},
+  {game:'BlazingFirepots',steps:[]},
+  {game:'BlingBlitzDiamondDrop',steps:[[640,575,2200]]},
+  {game:'ClashofGodsAnubisvsHades',steps:[[640,500,1500],[640,650,1200]]},
+  {game:'GrandPatron7rst',steps:[[640,500,1500],[640,650,1200]]},
+  {game:'HotRocket532',steps:[[735,360,1200],[640,620,1800]]},
+  {game:'JewelBoom',steps:[[640,575,2200]]},
+  {game:'JokerVsJoker',steps:[[640,500,1500],[640,650,1200]]},
+  {game:'JungleQueen',steps:[[640,500,1500],[640,650,1200]]},
+  {game:'KeepersOfTheSecret7rst',steps:[[640,500,1500],[640,650,1200]]},
+  {game:'MysticReels',steps:[[640,500,1500],[640,650,1200]]},
+  {game:'RedHotChilliChickens',steps:[[640,620,2200]]},
+  {game:'SweetSamurai',steps:[[640,500,1500],[640,650,1200]]},
+  {game:'ZeusGoesWild',steps:[[640,500,1500],[640,650,1200]]},
 ];
 const service=new BrowserService(config);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
-function apiRequests(events,marker){
-  return events.filter(e=>e.seq>marker&&e.type==='request'&&/bgaming-network\.com\/api\//i.test(e.url||'')).map(e=>({
-    url:e.url,method:e.method,postData:e.postData,
-  }));
-}
-
 await service.start();
 try{
   const manifest=[];
-  for(const mode of modes){
+  for(const item of cases){
+    const url=`https://demo.bgaming-network.com/play/${item.game}/FUN`;
     const session=await service.createSession({url,skipSplash:false,captureInitialScreenshot:false});
     const internal=service.sessions.get(session.id);
-    const dir=path.join('artifacts','bg-jsonrpc-ui','AllLuckyClover',String(mode.lines));
+    const dir=path.join('artifacts','bg-jsonrpc-ui',item.game);
     await fs.mkdir(dir,{recursive:true});
     try{
-      await sleep(6500);
-      await internal.page.mouse.click(mode.x,mode.y);
-      await sleep(2200);
-      let shot=await service.capture(session.id,'game');
-      await fs.copyFile(path.resolve(shot.path),path.join(dir,'00-game.png'));
-
-      // Capture the wager selector state without spinning.
-      await internal.page.mouse.click(410,665).catch(()=>{});
-      await sleep(900);
-      shot=await service.capture(session.id,'bet-selector');
-      await fs.copyFile(path.resolve(shot.path),path.join(dir,'01-bet-selector.png'));
-
-      const marker=internal.recorder.marker();
-      await internal.page.mouse.click(1125,680).catch(()=>{});
-      await sleep(1800);
-      await internal.recorder.waitForQuiet({quietMs:500,timeoutMs:3500}).catch(()=>{});
-      const requests=apiRequests(internal.recorder.eventsAfter(0),marker);
-      manifest.push({lines:mode.lines,ok:true,requests});
+      await sleep(7600);
+      const before=await service.capture(session.id,'before');
+      await fs.copyFile(path.resolve(before.path),path.join(dir,'00-before.png'));
+      for(const [x,y,wait] of item.steps){
+        await internal.page.mouse.click(x,y).catch(()=>{});
+        await sleep(wait);
+      }
+      await sleep(1400);
+      const after=await service.capture(session.id,'game');
+      await fs.copyFile(path.resolve(after.path),path.join(dir,'01-game.png'));
+      manifest.push({game:item.game,url,ok:true,steps:item.steps,final_url:internal.page.url()});
     }catch(error){
-      manifest.push({lines:mode.lines,ok:false,error:error.message});
+      manifest.push({game:item.game,url,ok:false,error:error.message,steps:item.steps});
     }finally{
       await service.closeSession(session.id).catch(()=>{});
       await sleep(250);
