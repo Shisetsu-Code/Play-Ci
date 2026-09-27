@@ -423,3 +423,18 @@ test('extracts JSON bet_slots buy and ante catalog', () => {
   assert.deepEqual(profile.modes[0].raw_bets,[20,100,200]);
   assert.deepEqual(profile.modes[3].wire_requirements,['round_mode_id']);
 });
+
+
+test('detects a direct BGaming client with base-spin-only wire', () => {
+  const source=[
+    'class UI{spin(){',
+    'let type=this.freeBets.isActive()?"freebet":"default";',
+    'return this.network.invoke("play",{token:this.network.token,req:{bet:this.bet,bet_type:type,custom_field:"custom_value",fe_exponent:this.exp}})',
+    '}}',
+  ].join('');
+  const profile=extractBgamingJsonRpcStaticProfile([jsEvent(source,'https://zeus.demo.bgaming-network.com/bundle.js')]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.equal(profile.source,'client_static_plain_spin_only');
+  assert.deepEqual(profile.modes,[]);
+});
