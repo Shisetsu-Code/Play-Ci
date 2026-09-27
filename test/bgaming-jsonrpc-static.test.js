@@ -334,3 +334,19 @@ test('extracts Clash of Gods ante and bonus-buy feature map', () => {
   );
   assert.equal(profile.modes[4].request_fields.buyBonusModeMultiplier,300);
 });
+
+
+test('extracts RedHotChilliChickens normal and super bonus buys', () => {
+  const source=[
+    'const historical=s&&"bonus_buy"===s.purchased_feature?e*(s.isSuperBonus?200:100):e;',
+    'const req={bet:100,bet_type:"betting",isSuperBonus:false,purchased_feature:"bonus_buy"};',
+  ].join('');
+  const profile=extractBgamingJsonRpcStaticProfile([jsEvent(source)]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.deepEqual(
+    profile.modes.map(x=>[x.id,x.multiplier,x.request_fields.isSuperBonus]),
+    [['bonus_buy',100,false],['super_bonus_buy',200,true]],
+  );
+  assert.equal(profile.modes[0].request_fields.bet_type,'betting');
+});
