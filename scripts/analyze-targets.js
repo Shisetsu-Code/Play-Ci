@@ -144,6 +144,34 @@ async function waitForBgamingBootstrap(internal, timeoutMs) {
   return {main, rpc};
 }
 
+function bgamingStaticProfileScore(profile) {
+  if (!profile) return -1;
+  return (
+    (profile.catalog_complete ? 1000 : 0) +
+    (profile.wire_complete ? 100 : 0) +
+    ((profile.modes || []).length * 10) +
+    ((profile.evidence_urls || []).length)
+  );
+}
+
+async function waitForBgamingJsonRpcStaticProfile(internal, timeoutMs = 5500) {
+  const deadline = Date.now() + timeoutMs;
+  let best = extractBgamingJsonRpcStaticProfile(internal.recorder.eventsAfter(0));
+
+  if (best?.catalog_complete) return best;
+
+  while (Date.now() < deadline) {
+    await sleep(250);
+    const candidate = extractBgamingJsonRpcStaticProfile(internal.recorder.eventsAfter(0));
+    if (bgamingStaticProfileScore(candidate) > bgamingStaticProfileScore(best)) {
+      best = candidate;
+    }
+    if (best?.catalog_complete) return best;
+  }
+
+  return best;
+}
+
 function detectThreeOaksClientFamily(events) {
   for (const event of events) {
     const url = event?.url || '';
@@ -264,7 +292,7 @@ async function discover(service, url) {
     if (bgStart || bgJsonRpc) {
       const source = bgStart || bgJsonRpc;
       const staticProfile = bgJsonRpc
-        ? extractBgamingJsonRpcStaticProfile(internal.recorder.eventsAfter(0))
+        ? await waitForBgamingJsonRpcStaticProfile(internal)
         : null;
       const protocol = bgStart
         ? summarizeBgamingBootstrap(bgStart)
