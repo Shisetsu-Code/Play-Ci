@@ -263,7 +263,7 @@ export function summarizeBgamingBootstrap(start) {
   };
 }
 
-export function summarizeBgamingJsonRpcInit(start) {
+export function summarizeBgamingJsonRpcInit(start, staticProfile = null) {
   const result = start?.body?.result || {};
   const config = result.config || {};
   const currency = result.currency_attributes || {};
@@ -274,9 +274,17 @@ export function summarizeBgamingJsonRpcInit(start) {
     : [];
 
   // JSONRPC `purchased_features` is an engine capability list, not a
-  // game-specific declaration of visible purchases/prices. Do not promote
-  // these aliases into wager modes until game-specific evidence resolves them.
-  const specialModes = [];
+  // game-specific declaration of visible purchases/prices. Promote only
+  // concrete game-specific modes extracted from the loaded client.
+  const specialModes = Array.isArray(staticProfile?.modes)
+    ? staticProfile.modes.map((mode) => ({
+        ...mode,
+        level: mode.level ?? mode.id ?? null,
+        multiplier: Number.isFinite(Number(mode.multiplier))
+          ? Number(mode.multiplier)
+          : null,
+      }))
+    : [];
 
   return {
     provider: 'bgaming',
@@ -312,6 +320,13 @@ export function summarizeBgamingJsonRpcInit(start) {
       state_lock: result.state_lock ?? null,
       rtp: config.rtp ?? null,
       displayed_rtp: config.displayed_rtp ?? null,
+      static_profile: staticProfile ? {
+        source: staticProfile.source ?? null,
+        catalog_complete: Boolean(staticProfile.catalog_complete),
+        wire_complete: Boolean(staticProfile.wire_complete),
+        request_shape: staticProfile.request_shape || [],
+        evidence_urls: staticProfile.evidence_urls || [],
+      } : null,
     },
   };
 }
@@ -326,7 +341,8 @@ export function bgamingReviewReasons(protocol) {
   }
   if (
     protocol?.generation === 'jsonrpc' &&
-    (protocol?.purchased_feature_capabilities || []).length > 0
+    (protocol?.purchased_feature_capabilities || []).length > 0 &&
+    !protocol?.jsonrpc?.static_profile?.catalog_complete
   ) {
     reasons.push({
       code:'JSONRPC_FEATURE_CAPABILITIES_UNRESOLVED',
@@ -354,7 +370,7 @@ export function buildBgamingExecutionBlueprints(protocol) {
   const generation = protocol?.generation || 'unknown';
 
   if (generation === 'jsonrpc') {
-    return [{
+    const out = [{
       kind:'spin',
       id:'spin',
       evidence:'visible_wire_sample',
@@ -373,6 +389,44 @@ export function buildBgamingExecutionBlueprints(protocol) {
         },
       },
     }];
+
+    for (const mode of protocol?.special_modes || []) {
+      const requestFields = mode.request_fields && typeof mode.request_fields === 'object'
+        ? mode.request_fields
+        : {purchased_feature:mode.feature};
+      const requestTemplate = {
+        jsonrpc:'2.0',
+        method:'play',
+        id:'<REQUEST_ID>',
+        params:{
+          token:'<SESSION_TOKEN>',
+          state_lock:'<STATE_LOCK>',
+          req:{
+            bet:'<BET_SUBUNITS>',
+            ...requestFields,
+          },
+        },
+      };
+
+      out.push({
+        kind:mode.kind,
+        id:mode.id || `${mode.feature}:${mode.level ?? 'fixed'}`,
+        feature:mode.feature,
+        declared_level:mode.level ?? null,
+        declared_multiplier:mode.multiplier,
+        evidence:mode.source || 'client_static_config',
+        confidence:mode.wire_complete === false
+          ? 'declared_wire_requires_context'
+          : 'client_static_mapped',
+        wire_protocol:'jsonrpc-2.0',
+        request_template:requestTemplate,
+        unresolved_reason:mode.wire_complete === false
+          ? 'JSONRPC_WIRE_REQUIRES_GAME_CONTEXT'
+          : null,
+        wire_requirements:mode.wire_requirements || [],
+      });
+    }
+    return out;
   }
 
   const legacy = generation === 'legacy';
