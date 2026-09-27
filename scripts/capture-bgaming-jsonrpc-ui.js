@@ -1,152 +1,157 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import { config } from '../src/config.js';
 import { BrowserService } from '../src/browser-service.js';
 import { extractBgamingJsonRpcInit } from '../src/providers/bgaming.js';
 
-const games=[
-  'AztecsClawWildDice','BigBucksSaloon','BlackbeardsBounty','BlazingFirepots',
-  'BlingBlitzDiamondDrop','CatsLoveYummy','ChickenFire','ClashofGodsAnubisvsHades',
-  'CluckingHell','GrandPatron7rst','HotRocket532','JewelBoom','JokerVsJoker',
-  'JungleQueen','KeepersOfTheSecret7rst','MultiRush','MysticReels','RecycleRiches',
-  'RedHotChilliChickens','RocketEruptionTripleBlast','StarTrekNextGen','SugarMix',
-  'SweetSamurai','GatesOfPower','TheGodfather3PillarsOfPower','TreasureExplorer',
-  'WildClustersP','YommiRush','ZeusGoesWild',
-];
-
-const TERMS=[
-  'purchased_feature',
-  'feature_id',
-  'featureId',
-  'buy_id',
-  'bonus_buy',
-  'bonus_multiplier_type',
-  'machineId',
-  'buyFeatureById',
-  'buyFeatures',
-  'buy_features',
-  'buyBonusFeatures',
-];
-
-const service=new BrowserService({
-  ...config,
-  maxBodyBytes:10*1024*1024,
-  maxMemoryEvents:35000,
-});
+const games=['YommiRush','SugarMix','ChickenFire','BlackbeardsBounty','MultiRush'];
+const service=new BrowserService(config);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
-function cleanSnippet(text){
-  return text.replace(/\s+/g,' ').trim();
-}
+function parse(text){try{return JSON.parse(text)}catch{return null}}
 
-function snippetsFor(body,term,max=5){
-  const out=[];
-  let from=0;
-  const needle=term.toLowerCase();
-  const lower=body.toLowerCase();
-  while(out.length<max){
-    const i=lower.indexOf(needle,from);
-    if(i<0)break;
-    out.push(cleanSnippet(body.slice(Math.max(0,i-550),Math.min(body.length,i+term.length+950))));
-    from=i+term.length;
+async function waitInit(internal,timeout=10000){
+  const deadline=Date.now()+timeout;
+  while(Date.now()<deadline){
+    const init=extractBgamingJsonRpcInit(internal.recorder.eventsAfter(0));
+    if(init)return init;
+    await sleep(150);
   }
-  return out;
+  return null;
 }
 
-function likelyCode(url,body){
-  if(!body || typeof body!=='string')return false;
-  if(/\.(?:js|mjs)(?:\?|$)/i.test(url))return true;
-  return body.length>1000 && /(?:function|=>|class |purchased_feature|feature_id|buy_id|bonus_buy)/i.test(body);
-}
-
-async function inspect(game){
+async function fresh(game){
   const url=`https://demo.bgaming-network.com/play/${game}/FUN`;
   const session=await service.createSession({url,skipSplash:false,captureInitialScreenshot:false});
   const internal=service.sessions.get(session.id);
-  try{
-    await sleep(6500);
-    await internal.recorder.waitForQuiet({quietMs:450,timeoutMs:2500}).catch(()=>{});
-    const events=internal.recorder.eventsAfter(0);
-    const init=extractBgamingJsonRpcInit(events);
-    const sources=[];
+  const init=await waitInit(internal);
+  if(!init)throw new Error('JSONRPC init not found');
+  const request=parse(init.request?.postData||'')||{};
+  const result=init.body?.result||{};
+  return {session,internal,init,token:request?.params?.token||null,result};
+}
 
-    for(const event of events){
-      if(event.type!=='responsebody'||!likelyCode(event.url||'',event.body))continue;
-      const hits=[];
-      for(const term of TERMS){
-        const snippets=snippetsFor(event.body,term);
-        for(const snippet of snippets)hits.push({term,snippet});
-      }
-      if(hits.length){
-        sources.push({
-          url:event.url,
-          bytes:Buffer.byteLength(event.body),
-          hits:hits.slice(0,36),
-        });
-      }
-      if(sources.length>=25)break;
+async function play(internal,endpoint,payload){
+  return internal.page.evaluate(async ({endpoint,payload})=>{
+    try{
+      const response=await fetch(endpoint,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(payload),
+      });
+      const text=await response.text();
+      let body=null;
+      try{body=JSON.parse(text)}catch{}
+      return {http_status:response.status,ok:response.ok,body,text:text.slice(0,4000)};
+    }catch(error){
+      return {http_status:null,ok:false,error:error.message};
     }
+  },{endpoint,payload});
+}
 
+async function probeOne(game,feature){
+  let ctx=null;
+  try{
+    ctx=await fresh(game);
+    const endpoint=ctx.init.request?.url;
+    const cfg=ctx.result.config||{};
+    const bet=(cfg.bet_limits||[])[0]??cfg.default_bet??100;
+    const before=Number(ctx.result.balance);
+    const req={bet,bet_type:'bet',purchased_feature:feature};
+    const payload={
+      id:crypto.randomUUID(),
+      jsonrpc:'2.0',
+      method:'play',
+      params:{token:ctx.token,req},
+    };
+    if(ctx.result.state_lock)payload.params.state_lock=ctx.result.state_lock;
+    const response=await play(ctx.internal,endpoint,payload);
+    const result=response.body?.result||null;
+    const error=response.body?.error||null;
+    const after=Number(result?.balance);
+    const delta=Number.isFinite(before)&&Number.isFinite(after)?before-after:null;
     return {
-      game,url,ok:true,final_url:internal.page.url(),
-      init:{
-        endpoint:init?.request?.url||null,
-        purchased_features:init?.body?.result?.config?.purchased_features||[],
-        bet_limits:init?.body?.result?.config?.bet_limits||[],
-        default_bet:init?.body?.result?.config?.default_bet??null,
-        state_lock:init?.body?.result?.state_lock??null,
-      },
-      sources,
+      game,feature,bet,endpoint,
+      accepted:Boolean(result)&&!error,
+      http_status:response.http_status,
+      error,
+      final:result?.final??null,
+      balance_before:Number.isFinite(before)?before:null,
+      balance_after:Number.isFinite(after)?after:null,
+      cost:delta,
+      multiplier:Number.isFinite(delta)&&Number(bet)>0?delta/Number(bet):null,
+      response_keys:result?Object.keys(result):[],
+      resp_keys:result?.resp&&typeof result.resp==='object'?Object.keys(result.resp):[],
     };
   }catch(error){
-    return {game,url,ok:false,error:error.message};
+    return {game,feature,accepted:false,error:{message:error.message}};
   }finally{
-    await service.closeSession(session.id);
+    if(ctx?.session)await service.closeSession(ctx.session.id).catch(()=>{});
   }
 }
 
-async function pool(items,limit,fn){
-  const out=new Array(items.length);
-  let cursor=0;
-  async function worker(){
-    while(true){
-      const i=cursor++;
-      if(i>=items.length)return;
-      out[i]=await fn(items[i]);
+async function probeGame(game){
+  let ctx=null;
+  try{
+    ctx=await fresh(game);
+    const features=Array.isArray(ctx.result.config?.purchased_features)
+      ? [...ctx.result.config.purchased_features]
+      : [];
+    await service.closeSession(ctx.session.id);
+    ctx=null;
+
+    const results=[];
+    for(const feature of features){
+      results.push(await probeOne(game,String(feature)));
       await sleep(250);
     }
+    return {game,features,results};
+  }catch(error){
+    if(ctx?.session)await service.closeSession(ctx.session.id).catch(()=>{});
+    return {game,error:error.message,features:[],results:[]};
   }
-  await Promise.all(Array.from({length:limit},worker));
-  return out;
 }
 
 await service.start();
 try{
-  const results=await pool(games,4,inspect);
+  const reports=[];
+  for(const game of games){
+    reports.push(await probeGame(game));
+    await sleep(500);
+  }
   await fs.mkdir('artifacts/bg-jsonrpc-ui',{recursive:true});
-  await fs.writeFile('artifacts/bg-jsonrpc-ui/wire-callsites.json',JSON.stringify(results,null,2),'utf8');
-  await fs.writeFile('artifacts/bg-jsonrpc-ui/manifest.json',JSON.stringify(results.map(r=>({
+  await fs.writeFile('artifacts/bg-jsonrpc-ui/direct-feature-probe.json',JSON.stringify(reports,null,2),'utf8');
+  await fs.writeFile('artifacts/bg-jsonrpc-ui/manifest.json',JSON.stringify(reports.map(r=>({
     game:r.game,
-    ok:r.ok,
-    endpoint:r.init?.endpoint||null,
-    purchased_features:r.init?.purchased_features||[],
-    sources:r.sources?.map(s=>s.url)||[],
+    declared:r.features,
+    accepted:r.results.filter(x=>x.accepted).map(x=>({
+      feature:x.feature,
+      final:x.final,
+      cost:x.cost,
+      multiplier:x.multiplier,
+    })),
+    rejected:r.results.filter(x=>!x.accepted).map(x=>({
+      feature:x.feature,
+      code:x.error?.code??null,
+      message:x.error?.message??x.error?.data?.message??null,
+    })),
     error:r.error||null,
   })),null,2),'utf8');
-
-  const summary=results.map(r=>({
+  console.log(JSON.stringify(reports.map(r=>({
     game:r.game,
-    ok:r.ok,
-    purchased_features:r.init?.purchased_features||[],
-    callsites:(r.sources||[]).flatMap(s=>s.hits.map(h=>({
-      source:s.url.split('/').pop()?.split('?')[0]||s.url,
-      term:h.term,
-      snippet:h.snippet,
-    }))).filter((x,i,a)=>
-      i===a.findIndex(y=>y.term===x.term&&y.snippet===x.snippet)
-    ).slice(0,14),
+    declared:r.features,
+    accepted:r.results.filter(x=>x.accepted).map(x=>({
+      feature:x.feature,
+      final:x.final,
+      cost:x.cost,
+      multiplier:x.multiplier,
+    })),
+    rejected:r.results.filter(x=>!x.accepted).map(x=>({
+      feature:x.feature,
+      error:x.error,
+    })),
     error:r.error||null,
-  }));
-  console.log(JSON.stringify(summary,null,2));
+  })),null,2));
 }finally{
   await service.stop();
 }
