@@ -289,3 +289,48 @@ test('extracts SweetSamurai buy catalog without inventing wire', () => {
   assert.deepEqual(profile.modes.map(x=>[x.id,x.multiplier]),[['deep_spin',100],['deep_bonanza',150]]);
   assert.equal(profile.modes[0].request_fields,null);
 });
+
+
+test('extracts MysticReels respin and bonus-buy wager transforms', () => {
+  const source=[
+    'function convertClientModeNameToPlatformName(gameMode){switch(gameMode){',
+    'case "RESPIN_BUY": return "buy_chance";',
+    'case "BONUS_BUY": return "buy_bonus";}}',
+    'function addMetaDataToSpinRequest(request){',
+    'if(this._inEncore){request.bet=(request.bet*2)/3;request.purchased_feature=this.convertClientModeNameToPlatformName("RESPIN_BUY")}',
+    'else if(this._inBuyABonus){request.bet/=100;request.purchased_feature=this.convertClientModeNameToPlatformName("BONUS_BUY")}}',
+  ].join('');
+  const profile=extractBgamingJsonRpcStaticProfile([jsEvent(source)]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.deepEqual(
+    profile.modes.map(x=>[x.id,x.feature,x.multiplier,x.request_fields.bet]),
+    [
+      ['respin_buy','buy_chance',1.5,'<BASE_BET_SUBUNITS>'],
+      ['bonus_buy','buy_bonus',100,'<BASE_BET_SUBUNITS>'],
+    ],
+  );
+});
+
+test('extracts Clash of Gods ante and bonus-buy feature map', () => {
+  const source=[
+    'function E(t){t.ante_0="ante_0",t.ante_1="ante_1",t.ante_2="ante_2"}',
+    'function B(t){t.buy_bonus="buy_bonus",t.super_buy_bonus="super_buy_bonus"}',
+    'class G{constructor(){this.buyBonusModeMultiplier1=100,this.buyBonusModeMultiplier2=300,this.businessmanModeMultiplier1=3,this.businessmanModeMultiplier2=10,this.businessmanModeMultiplier3=800}}',
+    'network.invoke("play",{req:{bet:i,bet_type:n,fe_exponent:x,feature_buy:e,purchased_feature:r,bonus_type:y,buyBonusModeMultiplier:o}})',
+  ].join('');
+  const profile=extractBgamingJsonRpcStaticProfile([jsEvent(source)]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.deepEqual(
+    profile.modes.map(x=>[x.id,x.feature,x.multiplier]),
+    [
+      ['ante_1','buy_chance',3],
+      ['ante_0','buy_chance',10],
+      ['ante_2','buy_chance',800],
+      ['buy_bonus','buy_bonus',100],
+      ['super_buy_bonus','buy_bonus',300],
+    ],
+  );
+  assert.equal(profile.modes[4].request_fields.buyBonusModeMultiplier,300);
+});
