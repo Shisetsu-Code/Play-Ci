@@ -618,6 +618,131 @@ function fsMultiplierBuyMode(source, sourceUrl) {
   };
 }
 
+
+function bigBucksModes(source, sourceUrl) {
+  const multiplierMatch = source.match(/\bbuyBonusMultiplier\s*=\s*([0-9]+(?:\.[0-9]+)?)/);
+  if (!multiplierMatch) return null;
+  if (!/purchased_feature\s*:\s*["']buy_bonus["']/.test(source)) return null;
+  if (!/bonusPrices\.freespin_buy/.test(source)) return null;
+
+  const multiplier = Number(multiplierMatch[1]);
+  if (!Number.isFinite(multiplier) || multiplier <= 1) return null;
+
+  return {
+    source:'client_static_buy_bonus_multiplier',
+    catalog_complete:true,
+    wire_complete:true,
+    request_shape:['purchased_feature'],
+    modes:[{
+      kind:'buy',
+      feature:'buy_bonus',
+      id:'buy_bonus',
+      level:'buy_bonus',
+      multiplier,
+      raw_value:multiplier,
+      activation:false,
+      request_fields:{purchased_feature:'buy_bonus'},
+      wire_complete:true,
+      source:'client_static_buy_bonus_multiplier',
+      evidence_url:sourceUrl,
+    }],
+    evidence_urls:[sourceUrl],
+  };
+}
+
+function blazingFirepotsModes(source, sourceUrl) {
+  if (!/purchased_feature\s*:\s*["']buy_bonus["']/.test(source)) return null;
+  if (!/purchased_feature\s*:\s*["']buy_chance["']/.test(source)) return null;
+
+  const buy = source.match(/formatMoney\(\s*([0-9]+(?:\.[0-9]+)?)\s*\*\s*[A-Za-z_$][\w$]*\s*\)/);
+  const chance = source.match(/isAnteSpinActive\s*\?\s*([0-9]+(?:\.[0-9]+)?)\s*\*\s*[A-Za-z_$][\w$]*/);
+  if (!buy || !chance) return null;
+
+  const buyMultiplier = Number(buy[1]);
+  const chanceMultiplier = Number(chance[1]);
+  if (!Number.isFinite(buyMultiplier) || !Number.isFinite(chanceMultiplier)) return null;
+
+  return {
+    source:'client_static_blazing_feature_prices',
+    catalog_complete:true,
+    wire_complete:true,
+    request_shape:['purchased_feature','bet_type'],
+    modes:[
+      {
+        kind:'booster',
+        feature:'buy_chance',
+        id:'buy_chance',
+        level:'buy_chance',
+        multiplier:chanceMultiplier,
+        raw_value:chanceMultiplier,
+        activation:true,
+        request_fields:{
+          purchased_feature:'buy_chance',
+          bet_type:'betting',
+        },
+        wire_complete:true,
+        source:'client_static_blazing_feature_prices',
+        evidence_url:sourceUrl,
+      },
+      {
+        kind:'buy',
+        feature:'buy_bonus',
+        id:'buy_bonus',
+        level:'buy_bonus',
+        multiplier:buyMultiplier,
+        raw_value:buyMultiplier,
+        activation:false,
+        request_fields:{
+          purchased_feature:'buy_bonus',
+          bet_type:'betting',
+        },
+        wire_complete:true,
+        source:'client_static_blazing_feature_prices',
+        evidence_url:sourceUrl,
+      },
+    ],
+    evidence_urls:[sourceUrl],
+  };
+}
+
+function sweetSamuraiModes(source, sourceUrl) {
+  const costs = source.match(
+    /BUY_BONUS_COSTS["']?\s*,?\s*\{\s*DEEP_SPIN\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*DEEP_BONANZA\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*\}/
+  ) || source.match(
+    /BUY_BONUS_COSTS[^{}]{0,100}\{\s*DEEP_SPIN\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*DEEP_BONANZA\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*\}/
+  );
+  if (!costs) return null;
+  if (!/DEEP_SPIN\s*=\s*["']deep_spin["']/.test(source)) return null;
+  if (!/DEEP_BONANZA\s*=\s*["']deep_bonanza["']/.test(source)) return null;
+
+  const modes = [
+    ['deep_spin', Number(costs[1])],
+    ['deep_bonanza', Number(costs[2])],
+  ].map(([id, multiplier]) => ({
+    kind:'buy',
+    feature:'buy_bonus',
+    id,
+    level:id,
+    multiplier,
+    raw_value:multiplier,
+    activation:false,
+    request_fields:null,
+    wire_complete:false,
+    wire_requirements:['game_specific_buy_bonus_wire'],
+    source:'client_static_buy_bonus_costs',
+    evidence_url:sourceUrl,
+  }));
+
+  return {
+    source:'client_static_buy_bonus_costs',
+    catalog_complete:true,
+    wire_complete:false,
+    request_shape:[],
+    modes,
+    evidence_urls:[sourceUrl],
+  };
+}
+
 function dedupeModes(modes) {
   const seen = new Set();
   const out = [];
@@ -648,7 +773,7 @@ export function extractBgamingJsonRpcStaticProfile(events) {
   const candidates = [];
 
   for (const source of responseSources(events)) {
-    for (const extractor of [yommiFeatureModes, fsMultiplierBuyMode, jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
+    for (const extractor of [bigBucksModes, blazingFirepotsModes, sweetSamuraiModes, yommiFeatureModes, fsMultiplierBuyMode, jsonBuyFeatureModes, definitionModes, bonusMultiplierModes, configuredModes, chickenModes, treasureModes, shopModes]) {
       const profile = extractor(source.body, source.url);
       if (profile) candidates.push(profile);
     }
