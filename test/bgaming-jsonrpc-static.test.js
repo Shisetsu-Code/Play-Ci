@@ -214,3 +214,37 @@ test('extracts bonus multiplier purchase family with chance', () => {
     [['buy_chance',1.5],['freeSpin',100],['freeSpinRandom',200]],
   );
 });
+
+
+test('extracts Yommi feature multiplier and purchased-feature mappings', () => {
+  const source = [
+    'const s={FEATURES:{MORE_PETS:"MORE_PETS",BONUS:"BONUS",SUPER_BONUS:"SUPER_BONUS"}};',
+    'x.FEATURE_BET_MULTIPLIER=assign(assign(assign({},s.FEATURES.BONUS,100n),s.FEATURES.SUPER_BONUS,250n),s.FEATURES.MORE_PETS,3n);',
+    'x.PURCHASED_FEATURES=assign(assign(assign({},s.FEATURES.MORE_PETS,"buy_chance"),s.FEATURES.BONUS,"buy_bonus"),s.FEATURES.SUPER_BONUS,"buy_bonus_and_chance");',
+    'function play(){return {req:{bet:20,bet_type:"bet",purchased_feature:"buy_bonus",modelRev:0,minExponent:2}}}',
+  ].join('');
+  const profile=extractBgamingJsonRpcStaticProfile([jsEvent(source)]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.deepEqual(
+    profile.modes.map(x=>[x.feature,x.multiplier]),
+    [['buy_chance',3],['buy_bonus',100],['buy_bonus_and_chance',250]],
+  );
+  assert.equal(profile.modes[0].request_fields.modelRev,0);
+  assert.equal(profile.modes[0].request_fields.minExponent,2);
+});
+
+test('extracts single buy mode from client fsMultiplier', () => {
+  const source = [
+    'class B{constructor(){this.fsMultiplier=50}}',
+    'machineInfo.purchasedFeatures.some((e=>"buy_bonus"==e));',
+    'function send(){return {bet:100,bet_type:"default",purchased_feature:"buy_bonus"}}',
+  ].join('');
+  const profile=extractBgamingJsonRpcStaticProfile([jsEvent(source)]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.deepEqual(
+    profile.modes.map(x=>[x.feature,x.multiplier,x.request_fields.bet_type]),
+    [['buy_bonus',50,'default']],
+  );
+});
