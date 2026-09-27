@@ -13,6 +13,10 @@ function jsEvent(body, url='https://game.demo.bgaming-network.com/assets/main.js
   return {type:'responsebody', url, body};
 }
 
+function jsonEvent(value, url='https://game.demo.bgaming-network.com/gameConfig.json') {
+  return {type:'responsebody', url, body:JSON.stringify(value)};
+}
+
 test('extracts constant-backed shop modes and buy_id wire shape', () => {
   const source = [
     'const Qd=90,Yd=2,_a="boost",Ny="cx64";',
@@ -144,4 +148,69 @@ test('static JSONRPC catalog removes unresolved capability review and builds mod
   assert.equal(blueprints.length,2);
   assert.equal(blueprints[1].request_template.params.req.buy_id,'bonus');
   assert.equal(blueprints[1].request_template.params.req.purchased_feature,'buy_bonus');
+});
+
+
+test('extracts JSON buyFeatureInfo configs with buy_feature_id wire', () => {
+  const profile=extractBgamingJsonRpcStaticProfile([
+    jsonEvent({
+      buyFeatureInfo:{
+        configs:[
+          {buyFeatureId:1,purchasedFeature:'buy_bonus',pricePercent:10000},
+        ],
+      },
+      featureOnOff:{buyFeature:true},
+    }),
+  ]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.deepEqual(profile.request_shape,['buy_feature_id']);
+  assert.deepEqual(
+    profile.modes.map(x=>[x.feature,x.id,x.multiplier,x.request_fields.buy_feature_id]),
+    [['buy_bonus','1',100,1]],
+  );
+});
+
+test('extracts engine definition normal/super buy costs as a complete catalog', () => {
+  const profile=extractBgamingJsonRpcStaticProfile([
+    jsonEvent({
+      engine:{definition:{normalBuyCost:100,superBuyCost:200}},
+    }, 'https://game.demo.bgaming-network.com/definitions.json'),
+  ]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,false);
+  assert.deepEqual(
+    profile.modes.map(x=>[x.id,x.multiplier]),
+    [['normal',100],['super',200]],
+  );
+});
+
+test('extracts engine definition freespin/respin buy multipliers', () => {
+  const profile=extractBgamingJsonRpcStaticProfile([
+    jsonEvent({
+      engine:{definition:{featureBuyMulFreespin:75,featureBuyMulRespin:30}},
+    }, 'https://game.demo.bgaming-network.com/definitions.json'),
+  ]);
+  assert.equal(profile.catalog_complete,true);
+  assert.deepEqual(
+    profile.modes.map(x=>[x.id,x.multiplier]),
+    [['freespin',75],['respin',30]],
+  );
+});
+
+test('extracts bonus multiplier purchase family with chance', () => {
+  const source = [
+    'const e=state,t=100*e.bet,n=200*e.bet;',
+    'const cfg={goldenBetMulti:1.5};',
+    'async function a(){return play({bet:e.bet,purchased_feature:"buy_bonus",bonus_multiplier_type:"freeSpin"})}',
+    'async function b(){return play({bet:e.bet,purchased_feature:"buy_bonus",bonus_multiplier_type:"freeSpinRandom"})}',
+    'async function c(){return play({bet:e.bet,purchased_feature:e.buyChance?"buy_chance":void 0,bet_type:"bet"})}',
+  ].join('');
+  const profile=extractBgamingJsonRpcStaticProfile([jsEvent(source)]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.deepEqual(
+    profile.modes.map(x=>[x.id,x.multiplier]),
+    [['buy_chance',1.5],['freeSpin',100],['freeSpinRandom',200]],
+  );
 });
