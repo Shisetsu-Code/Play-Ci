@@ -1,77 +1,88 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { config } from '../src/config.js';
 import { BrowserService } from '../src/browser-service.js';
 
-const games=[
-  'BigBucksSaloon',
-  'BlingBlitzDiamondDrop',
-  'GrandPatron7rst',
-  'HotRocket532',
-  'JewelBoom',
-  'ZeusGoesWild',
+const cases=[
+  {game:'BlingBlitzDiamondDrop', intro:[[820,380,900],[640,575,2500]]},
+  {game:'HotRocket532', intro:[[820,380,900],[640,575,2500]]},
+  {game:'JewelBoom', intro:[[820,380,900],[640,575,2500]]},
+  {game:'ZeusGoesWild', intro:[[820,380,900],[640,575,2500]]},
 ];
-const service=new BrowserService({...config,maxBodyBytes:20*1024*1024,maxMemoryEvents:50000});
+const service=new BrowserService({...config,maxBodyBytes:10*1024*1024,maxMemoryEvents:30000});
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
-function safeName(url){
-  const tail=url.split('/').pop()?.split('?')[0]||'asset';
-  return tail.replace(/[^A-Za-z0-9._-]+/g,'_').slice(0,120);
-}
-
-function useful(url,body){
-  if(typeof body!=='string'||body.length<40)return false;
-  if(/\.(?:js|mjs|json)(?:\?|$)/i.test(url||''))return true;
-  if(/\/api(?:\/|\?|$)|game.?config|definition|slot.?parameters/i.test(url||''))return true;
-  return /purchased_features|featureBuyMul|buyBonusMultiplier|buy_bonus|buy_chance/i.test(body);
-}
-
-async function inspect(game){
-  const url=`https://demo.bgaming-network.com/play/${game}/FUN?server=demo`;
-  const session=await service.createSession({url,skipSplash:false,captureInitialScreenshot:false});
-  const internal=service.sessions.get(session.id);
-  const dir=path.join('artifacts','bg-jsonrpc-ui','sources',game);
-  await fs.mkdir(dir,{recursive:true});
-  try{
-    await sleep(10000);
-    await internal.recorder.waitForQuiet({quietMs:600,timeoutMs:3500}).catch(()=>{});
-    const events=internal.recorder.eventsAfter(0);
-    const saved=[];
-    for(const e of events){
-      if(e.type!=='responsebody'||!useful(e.url,e.body))continue;
-      const ext=/\.json(?:\?|$)/i.test(e.url||'')?'json':'txt';
-      const name=`${String(saved.length).padStart(2,'0')}-${safeName(e.url)}-${crypto.createHash('sha1').update(e.url||'').digest('hex').slice(0,8)}.${ext}`;
-      await fs.writeFile(path.join(dir,name),e.body,'utf8');
-      saved.push({url:e.url,file:name,bytes:Buffer.byteLength(e.body)});
-      if(saved.length>=40)break;
-    }
-    return {
-      game,ok:true,final_url:internal.page.url(),
-      title:await internal.page.title().catch(()=>null),
-      saved,
-    };
-  }catch(error){
-    return {game,ok:false,error:error.message,saved:[]};
-  }finally{
-    await service.closeSession(session.id).catch(()=>{});
-  }
+async function state(page){
+  return page.evaluate(()=>({
+    url:location.href,
+    title:document.title,
+    bodyText:(document.body?.innerText||'').replace(/\s+/g,' ').trim().slice(0,3000),
+    canvases:[...document.querySelectorAll('canvas')].map(c=>{
+      const r=c.getBoundingClientRect();
+      return {width:c.width,height:c.height,rect:{x:r.x,y:r.y,width:r.width,height:r.height}};
+    }),
+  })).catch(error=>({error:error.message}));
 }
 
 await service.start();
 try{
-  const results=[];
-  for(const game of games){
-    results.push(await inspect(game));
-    await sleep(350);
+  const manifest=[];
+  for(const item of cases){
+    const url=`https://demo.bgaming-network.com/play/${item.game}/FUN?server=demo`;
+    const session=await service.createSession({url,skipSplash:false,captureInitialScreenshot:false});
+    const internal=service.sessions.get(session.id);
+    const dir=path.join('artifacts','bg-jsonrpc-ui',item.game);
+    await fs.mkdir(dir,{recursive:true});
+    try{
+      await sleep(7500);
+      let shot=await service.capture(session.id,'00-ready');
+      await fs.copyFile(path.resolve(shot.path),path.join(dir,'00-ready.png'));
+
+      for(const [x,y,wait] of item.intro){
+        await internal.page.mouse.click(x,y).catch(()=>{});
+        await sleep(wait);
+      }
+      await sleep(2000);
+      shot=await service.capture(session.id,'01-main');
+      await fs.copyFile(path.resolve(shot.path),path.join(dir,'01-main.png'));
+
+      // Capture one extra state after closing common intro/modal areas without wagering.
+      for(const [x,y,wait] of [[640,575,1000],[640,360,1000]]){
+        await internal.page.mouse.click(x,y).catch(()=>{});
+        await sleep(wait);
+      }
+      shot=await service.capture(session.id,'02-settled');
+      await fs.copyFile(path.resolve(shot.path),path.join(dir,'02-settled.png'));
+
+      const events=internal.recorder.eventsAfter(0);
+      const purchaseMarkers=[];
+      for(const e of events){
+        if(e.type!=='responsebody'||typeof e.body!=='string')continue;
+        if(!/\.(?:js|mjs|json)(?:\?|$)/i.test(e.url||''))continue;
+        const body=e.body;
+        const markers=[
+          'purchased_feature','buy_bonus','buy_chance','buy_bonus_and_chance',
+          'featureBuyMulFreespin','featureBuyMulRespin','purchaseFeaturesConfig',
+          'buyFeatureId','buy_feature_id','buy_id','bonus_buy'
+        ].filter(k=>body.includes(k));
+        if(markers.length)purchaseMarkers.push({url:e.url,markers});
+      }
+
+      manifest.push({
+        game:item.game,url,ok:true,
+        page_state:await state(internal.page),
+        purchase_marker_sources:purchaseMarkers.slice(0,30),
+      });
+    }catch(error){
+      manifest.push({game:item.game,url,ok:false,error:error.message});
+    }finally{
+      await service.closeSession(session.id).catch(()=>{});
+      await sleep(300);
+    }
   }
-  await fs.mkdir('artifacts/bg-jsonrpc-ui',{recursive:true});
-  await fs.writeFile('artifacts/bg-jsonrpc-ui/manifest.json',JSON.stringify(results,null,2),'utf8');
-  console.log(JSON.stringify(results.map(r=>({
-    game:r.game,ok:r.ok,final_url:r.final_url||null,title:r.title||null,
-    saved:r.saved.map(s=>({url:s.url,file:s.file,bytes:s.bytes})),
-    error:r.error||null,
+  await fs.writeFile('artifacts/bg-jsonrpc-ui/manifest.json',JSON.stringify(manifest,null,2),'utf8');
+  console.log(JSON.stringify(manifest.map(x=>({
+    game:x.game,ok:x.ok,page_state:x.page_state,
+    purchase_marker_sources:x.purchase_marker_sources,error:x.error||null,
   })),null,2));
-}finally{
-  await service.stop();
-}
+}finally{await service.stop()}
