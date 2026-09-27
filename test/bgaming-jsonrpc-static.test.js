@@ -368,3 +368,30 @@ test('extracts JokerVsJoker businessman and buy-bonus modes', () => {
   assert.equal(profile.modes[0].request_fields.buyBonusModeMultiplier,1);
   assert.equal(profile.modes[1].request_fields.buyBonusModeMultiplier,60);
 });
+
+
+test('extracts JungleQueen fixed buy-bonus wire and multiplier', () => {
+  const source=[
+    'let ua=100;',
+    'function buy(){const n="buybonus",s="buybonus";return fetch("/api",{body:JSON.stringify({method:"play",params:{req:{bet:100,action:n,id:s,purchased_feature:"buy_bonus"}}})})}',
+  ].join('');
+  const profile=extractBgamingJsonRpcStaticProfile([jsEvent(source)]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.deepEqual(
+    profile.modes.map(x=>[x.id,x.feature,x.multiplier]),
+    [['buybonus','buy_bonus',100]],
+  );
+  assert.equal(profile.modes[0].request_fields.action,'buybonus');
+  assert.equal(profile.modes[0].request_fields.id,'buybonus');
+});
+
+test('treats client buy_btn false as a complete zero-purchase catalog', () => {
+  const profile=extractBgamingJsonRpcStaticProfile([
+    jsonEvent({bg_gaming:{buy_btn:'false'}}, 'https://game.demo.bgaming-network.com/slot_parameters.json'),
+  ]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.deepEqual(profile.modes,[]);
+  assert.equal(profile.source,'client_json_buy_disabled');
+});
