@@ -465,3 +465,37 @@ test('detects OGA client with no game-specific feature-buy definition', () => {
   assert.equal(profile.source,'client_oga_no_feature_buy_definition');
   assert.deepEqual(profile.modes,[]);
 });
+
+
+test('resolves StarTrek feature-buy flags across definitions and game client', () => {
+  const events=[
+    jsonEvent({
+      engine:{definition:{featureBuyMulFreespin:75,featureBuyMulRespin:30}},
+    }, 'https://game.demo.bgaming-network.com/game/definitions.json'),
+    jsEvent([
+      'customizeFeatureBuyRequestData(e){',
+      'this.isFeatureBuyFreeSpin="FreeSpin"===e.Mode;',
+      'this.isFeatureBuyRespin="Respin"===e.Mode;',
+      '}',
+      'const req={selectedWinLines:null,perLine:true,isFeatureBuyFreeSpin:false,isFeatureBuyRespin:false};',
+    ].join(''), 'https://game.demo.bgaming-network.com/game/game.min.js'),
+  ];
+  const profile=extractBgamingJsonRpcStaticProfile(events);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.equal(profile.source,'client_static_feature_buy_flags');
+  assert.deepEqual(
+    profile.modes.map(x=>[
+      x.id,
+      x.multiplier,
+      x.request_fields.custom_req.isFeatureBuyFreeSpin,
+      x.request_fields.custom_req.isFeatureBuyRespin,
+      x.request_fields.custom_req.action,
+      x.request_fields.custom_req.stake,
+    ]),
+    [
+      ['freespin',75,true,false,'spin','<BET_SUBUNITS>'],
+      ['respin',30,false,true,'spin','<BET_SUBUNITS>'],
+    ],
+  );
+});
