@@ -5,6 +5,7 @@ import {
   extractBgamingJsonRpcInit,
   extractBgamingUnrecognizedInit,
   summarizeBgamingBootstrap,
+  summarizeBgamingAllLuckyCloverLauncher,
   summarizeBgamingJsonRpcInit,
   bgamingNeedsReview,
   buildBgamingExecutionBlueprints,
@@ -244,4 +245,24 @@ test('detects BGaming init responses whose schema is not mapped yet', () => {
   const start=extractBgamingUnrecognizedInit(events);
   assert.ok(start);
   assert.deepEqual(start.body,{wallet:100000,game:0});
+});
+
+
+test('models AllLuckyClover launcher as four fixed-line wire variants', () => {
+  const p=summarizeBgamingAllLuckyCloverLauncher();
+  assert.equal(p.generation,'legacy-fixed-lines');
+  assert.deepEqual(p.launcher.line_choices,[5,20,40,100]);
+  assert.equal(p.line_variants.length,4);
+  assert.deepEqual(p.line_variants[0].display_bets,[0.1,0.2,0.3,0.4,0.5,1,1.5,2,3,5,10]);
+  assert.deepEqual(p.line_variants[3].raw_bets,[50,100,150,200,250,300,350,400,450,500,1500,2500]);
+  assert.equal(bgamingNeedsReview(p),false);
+
+  const blueprints=buildBgamingExecutionBlueprints(p);
+  assert.equal(blueprints.length,4);
+  assert.equal(blueprints[0].endpoint_game,'AllLuckyClover5');
+  assert.deepEqual(blueprints[0].request_template.options,{bet:'<BET_SUBUNITS>'});
+  assert.equal(blueprints[3].lines,100);
+
+  const catalog=bgamingCatalog(p);
+  assert.equal(catalog.line_variants.length,4);
 });
