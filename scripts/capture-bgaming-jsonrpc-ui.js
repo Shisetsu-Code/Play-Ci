@@ -19,54 +19,50 @@ const service=new BrowserService({
   maxMemoryEvents:30000,
 });
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const interesting=/(?:buy|purchas|feature|chance|bonus|price|cost|multiplier|rtp|respin|free.?spin)/i;
 
 function parseJson(text){
   try{return JSON.parse(text)}catch{return null}
 }
 
-function collectJsonRpcConfig(init){
-  const cfg=init?.body?.result?.config||{};
-  return {
-    bet_limits:cfg.bet_limits||[],
-    default_bet:cfg.default_bet??null,
-    purchased_features:Array.isArray(cfg.purchased_features)?cfg.purchased_features:[],
-    config_keys:Object.keys(cfg).sort(),
-  };
+function compactValue(value){
+  if(value==null || typeof value==='string' || typeof value==='number' || typeof value==='boolean') return value;
+  try{
+    const text=JSON.stringify(value);
+    if(text.length<=3500) return value;
+    return text.slice(0,3500)+'…';
+  }catch{
+    return String(value).slice(0,3500);
+  }
 }
 
-function interestingStrings(body){
-  const out=new Set();
-  const patterns=[
-    /["'`]((?:buy|bonus|freespin|free_spin|chance|feature)[A-Za-z0-9_-]{0,80})["'`]/gi,
-    /["'`]([A-Za-z0-9_-]{0,40}(?:buy|bonus|freespin|free_spin|chance|feature)[A-Za-z0-9_-]{0,40})["'`]/gi,
-    /["'`]((?:freeSpin|buyBonus|bonusMultiplier|featureId)[A-Za-z0-9_-]{0,80})["'`]/g,
-  ];
-  for(const regex of patterns){
-    let match;
-    while((match=regex.exec(body))!==null){
-      const value=match[1];
-      if(value.length>=3&&value.length<=100) out.add(value);
-      if(out.size>=300) break;
-    }
+function walk(value,path='',depth=0,out=[]){
+  if(depth>12 || out.length>=350) return out;
+  if(Array.isArray(value)){
+    value.slice(0,120).forEach((v,i)=>walk(v,`${path}[${i}]`,depth+1,out));
+    return out;
   }
-  return [...out].sort();
+  if(!value || typeof value!=='object') return out;
+
+  for(const [key,val] of Object.entries(value)){
+    const next=path ? `${path}.${key}` : key;
+    if(interesting.test(key) || interesting.test(next)){
+      out.push({path:next,value:compactValue(val)});
+      if(out.length>=350) return out;
+    }
+    if(val && typeof val==='object') walk(val,next,depth+1,out);
+    if(out.length>=350) return out;
+  }
+  return out;
 }
 
-function markerSnippets(body){
-  const markers=['purchased_feature','feature_id','featureId','bonus_multiplier_type','buy_super_bonus','buy_ultra_bonus','freeSpinRandom'];
-  const snippets=[];
-  for(const marker of markers){
-    let from=0;
-    while(snippets.length<80){
-      const idx=body.indexOf(marker,from);
-      if(idx<0) break;
-      const start=Math.max(0,idx-180);
-      const end=Math.min(body.length,idx+marker.length+260);
-      snippets.push({marker,snippet:body.slice(start,end)});
-      from=idx+marker.length;
-    }
-  }
-  return snippets;
+function sourcePriority(url){
+  const lower=url.toLowerCase();
+  if(/\/api\/?(?:$|\?)/.test(lower)) return 5;
+  if(/gameconfig|game-config|config\.|\/config\/|definitions|clientconfig/.test(lower)) return 4;
+  if(/localization|locale|lang/.test(lower)) return 2;
+  if(/\.json(?:\?|$)/.test(lower)) return 1;
+  return 0;
 }
 
 async function inspect(game){
@@ -75,35 +71,38 @@ async function inspect(game){
   const internal=service.sessions.get(session.id);
   try{
     await sleep(6500);
-    await internal.recorder.waitForQuiet({quietMs:500,timeoutMs:2500}).catch(()=>{});
+    await internal.recorder.waitForQuiet({quietMs:450,timeoutMs:2500}).catch(()=>{});
     const events=internal.recorder.eventsAfter(0);
     const init=extractBgamingJsonRpcInit(events);
-    const sources=[];
-    const tokenUnion=new Set();
+    const docs=[];
 
     for(const event of events){
-      if(event.type!=='responsebody'||typeof event.body!=='string'||!event.body) continue;
-      const body=event.body;
-      const tokens=interestingStrings(body);
-      const snippets=markerSnippets(body);
-      if(tokens.length===0&&snippets.length===0) continue;
-      for(const token of tokens) tokenUnion.add(token);
-      sources.push({
+      if(event.type!=='responsebody' || typeof event.body!=='string' || !event.body) continue;
+      const body=parseJson(event.body);
+      if(!body) continue;
+      const hits=walk(body);
+      if(hits.length===0) continue;
+      docs.push({
         url:event.url,
-        bytes:Buffer.byteLength(body),
-        content_json:Boolean(parseJson(body)),
-        tokens,
-        snippets,
+        priority:sourcePriority(event.url),
+        bytes:Buffer.byteLength(event.body),
+        top_keys:Array.isArray(body)?['<array>']:Object.keys(body).slice(0,60),
+        hits,
       });
-      if(sources.length>=80) break;
     }
+    docs.sort((a,b)=>b.priority-a.priority || a.url.localeCompare(b.url));
 
     return {
       game,url,ok:true,
       final_url:internal.page.url(),
-      init:collectJsonRpcConfig(init),
-      extracted_tokens:[...tokenUnion].sort(),
-      sources,
+      init:{
+        endpoint:init?.request?.url||null,
+        purchased_features:init?.body?.result?.config?.purchased_features||[],
+        default_bet:init?.body?.result?.config?.default_bet??null,
+        bet_limits:init?.body?.result?.config?.bet_limits||[],
+        state_lock:init?.body?.result?.state_lock??null,
+      },
+      docs:docs.slice(0,45),
     };
   }catch(error){
     return {game,url,ok:false,error:error.message};
@@ -117,9 +116,9 @@ async function pool(items,limit,fn){
   let cursor=0;
   async function worker(){
     while(true){
-      const index=cursor++;
-      if(index>=items.length)return;
-      out[index]=await fn(items[index]);
+      const i=cursor++;
+      if(i>=items.length) return;
+      out[i]=await fn(items[i]);
       await sleep(250);
     }
   }
@@ -131,14 +130,13 @@ await service.start();
 try{
   const results=await pool(games,4,inspect);
   await fs.mkdir('artifacts/bg-jsonrpc-ui',{recursive:true});
-  await fs.writeFile('artifacts/bg-jsonrpc-ui/asset-feature-scan.json',JSON.stringify(results,null,2),'utf8');
+  await fs.writeFile('artifacts/bg-jsonrpc-ui/json-feature-config.json',JSON.stringify(results,null,2),'utf8');
   await fs.writeFile('artifacts/bg-jsonrpc-ui/manifest.json',JSON.stringify(results.map(r=>({
     game:r.game,
     ok:r.ok,
-    final_url:r.final_url||null,
+    endpoint:r.init?.endpoint||null,
     purchased_features:r.init?.purchased_features||[],
-    extracted_tokens:r.extracted_tokens||[],
-    source_count:r.sources?.length||0,
+    relevant_docs:(r.docs||[]).map(d=>d.url),
     error:r.error||null,
   })),null,2),'utf8');
 
@@ -146,10 +144,13 @@ try{
     game:r.game,
     ok:r.ok,
     purchased_features:r.init?.purchased_features||[],
-    extracted_tokens:(r.extracted_tokens||[]).filter(x=>
-      /buy|chance|feature_id|featureId|freeSpinRandom|super_bonus|ultra_bonus/i.test(x)
+    hits:(r.docs||[]).flatMap(d=>d.hits.map(h=>({
+      source:d.url,
+      path:h.path,
+      value:h.value,
+    }))).filter(h=>
+      /(?:buy|purchas|chance|feature.*(?:price|cost|multiplier)|(?:price|cost|multiplier).*feature|super.*bonus|bonus.*(?:price|cost|multiplier))/i.test(h.path)
     ).slice(0,80),
-    marker_sources:(r.sources||[]).filter(s=>s.snippets?.length).map(s=>s.url).slice(0,12),
     error:r.error||null,
   })),null,2));
 }finally{
