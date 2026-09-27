@@ -36,6 +36,7 @@ export function extractBgamingJsonRpcInit(events) {
     if (requestBody?.method !== 'init') continue;
     if (!Array.isArray(body.result.config.bet_limits)) continue;
 
+    const cfg = body.result.config || {};
     candidates.push({
       body,
       request: request ? {
@@ -45,9 +46,17 @@ export function extractBgamingJsonRpcInit(events) {
         postData: request.postData ?? null,
       } : null,
       command: 'init',
-      score: 10,
+      score:
+        10 +
+        (cfg.bet_limits.length > 0 ? 20 : 0) +
+        (Number.isFinite(Number(cfg.default_bet)) ? 4 : 0) +
+        (Array.isArray(cfg.purchased_features) && cfg.purchased_features.length > 0 ? 3 : 0) +
+        (body.result.currency_attributes ? 2 : 0) +
+        (body.result.balance != null ? 1 : 0),
     });
   }
+
+  candidates.sort((a, b) => b.score - a.score);
   return candidates[0] || null;
 }
 
