@@ -101,16 +101,17 @@ Unknown economic-looking actions such as `set_params` require review.
 
 They are not ignored just because normal spin/buy fields were understood.
 
-## Acceptance criterion for this project phase
+## Acceptance criterion for a provider catalog
 
-For the current 3 Oaks target list:
+For any provider target list:
 
-1. every target has a complete normal bet catalog;
-2. every declared buy/booster is present;
-3. every unexplained action is explicitly listed;
-4. repeated UI layouts have a visually verified profile;
-5. every special mode is runtime validated by real click evidence where the demo permits it;
-6. final artifacts merge the full target set without silently dropping failures.
+1. every reachable target has a complete normal bet catalog;
+2. every game-specific buy/booster/chance mode supported by provider/client evidence is represented;
+3. generic engine capabilities are not promoted into game-specific modes without evidence;
+4. every unexplained economic action remains explicit rather than guessed away;
+5. runtime/UI proof is tracked separately from catalog completeness;
+6. unavailable public demos are isolated explicitly;
+7. final artifacts retain the full target set without silently dropping failures.
 
 
 ## Runtime proof levels
@@ -140,3 +141,12 @@ For 3 Oaks, `start` is sufficiently descriptive to make a game catalog-complete 
 Fresh-session replay is permitted only after the mode has already been declared by the real provider bootstrap. It is used to verify that the declared request semantics are accepted by the same demo endpoint when UI rendering or client hooks are unreliable.
 
 Replay statuses must remain visibly different from `VALIDATED_VISUAL`; replay does not prove that a visible control was reachable.
+
+
+## BGaming-specific completeness
+
+BGaming uses multiple client generations. For v2/legacy clients, captured bootstrap configuration is authoritative for normal bets and directly declared economic modes. For JSON-RPC clients, `config.purchased_features` is only a capability list; game-specific loaded client/static configuration is required before a purchase/chance mode is cataloged.
+
+A BGaming target can be catalog-complete without exhaustive UI clicks when the bootstrap/client configuration fully enumerates bets and special modes. Runtime click/wire evidence remains a separate proof layer.
+
+If BGaming's own public demo URL returns its Page Not Found client, mark the target `UNAVAILABLE_DEMO`; do not fabricate a catalog from marketing metadata.
