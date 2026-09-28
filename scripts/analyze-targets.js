@@ -1725,11 +1725,23 @@ function markdown(report) {
 
     if (target.protocol) {
       lines.push(`- Actions: ${JSON.stringify(target.protocol.actions || [])}`);
-      lines.push(`- Unhandled actions: ${JSON.stringify(target.protocol.unhandled_actions || [])}`);
-      lines.push(`- Buy modes: ${JSON.stringify(target.protocol.available_buy_bonus || [])}`);
-      lines.push(`- Buy prices: ${JSON.stringify(target.protocol.buy_bonus_prices || {})}`);
-      lines.push(`- Boosters: ${JSON.stringify(target.protocol.available_booster || [])}`);
-      lines.push(`- Booster prices: ${JSON.stringify(target.protocol.booster_prices || {})}`);
+
+      if (target.provider === 'bgaming') {
+        lines.push(`- Generation: ${target.protocol.generation || 'unknown'}`);
+        lines.push(`- Bets: ${JSON.stringify(target.protocol.display_bets || [])}`);
+        lines.push(`- Buy modes: ${JSON.stringify(target.protocol.buy_modes || [])}`);
+        lines.push(`- Boosters/chance: ${JSON.stringify(target.protocol.boosters || [])}`);
+        lines.push(`- Other feature modes: ${JSON.stringify(target.protocol.other_features || [])}`);
+        lines.push(`- Purchased-feature capabilities: ${JSON.stringify(target.protocol.purchased_feature_capabilities || [])}`);
+        lines.push(`- Line variants: ${JSON.stringify(target.protocol.line_variants || [])}`);
+      } else {
+        lines.push(`- Unhandled actions: ${JSON.stringify(target.protocol.unhandled_actions || [])}`);
+        lines.push(`- Buy modes: ${JSON.stringify(target.protocol.available_buy_bonus || [])}`);
+        lines.push(`- Buy prices: ${JSON.stringify(target.protocol.buy_bonus_prices || {})}`);
+        lines.push(`- Boosters: ${JSON.stringify(target.protocol.available_booster || [])}`);
+        lines.push(`- Booster prices: ${JSON.stringify(target.protocol.booster_prices || {})}`);
+      }
+
       lines.push(`- Review reasons: ${JSON.stringify(target.review_reasons || [])}`);
       lines.push(`- Execution blueprints: ${(target.execution_blueprints || []).length}`);
     }
