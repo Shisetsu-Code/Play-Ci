@@ -3,10 +3,10 @@ import { config } from '../src/config.js';
 import { BrowserService } from '../src/browser-service.js';
 
 const cases=[
-  {game:'GrandPatron7rst',terms:['round_mode_id','roundMode','rmid','SHOP3','SHOP2','ANTE','bet_slots','purchased_feature']},
-  {game:'RocketEruptionTripleBlast',terms:['custom_req','buy_mode','normalBuyCost','superBuyCost','buy_bonus','purchased_feature','featureBuy']},
-  {game:'TheGodfather3PillarsOfPower',terms:['custom_req','buy_mode','normalBuyCost','superBuyCost','buy_bonus','purchased_feature','featureBuy']},
-  {game:'SweetSamurai',terms:['deep_spin','deep_bonanza','DEEP_SPIN','DEEP_BONANZA','purchased_feature','buy_bonus','custom_req','buy_mode']},
+  {game:'GrandPatron7rst',terms:['round_mode_id','roundModeID','mUIRoundModeID','setRoundMode','getCurBetsInfoByType','sendSrvCommand','SHOP3','SHOP2','ANTE','purchased_feature']},
+  {game:'RocketEruptionTripleBlast',terms:['isNormalBuy','NormalBuyBonus','SuperBuyBonus','customizeFeatureBuyRequestData','custom_req','normalBuyCost','superBuyCost','buy_bonus','purchased_feature']},
+  {game:'TheGodfather3PillarsOfPower',terms:['isNormalBuy','NormalBuyBonus','SuperBuyBonus','customizeFeatureBuyRequestData','custom_req','normalBuyCost','superBuyCost','buy_bonus','purchased_feature']},
+  {game:'SweetSamurai',terms:['deep_spin','deep_bonanza','deepSpinActive','deepBonanzaActive','BonusType','purchased_feature','buy_bonus','sendRequest','network.invoke','play']},
 ];
 
 const service=new BrowserService({
