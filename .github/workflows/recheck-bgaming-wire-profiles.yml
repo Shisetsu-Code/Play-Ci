@@ -1,0 +1,40 @@
+name: Recheck BGaming wire profiles
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TARGET_FILE: /tmp/bg-wire-review.txt
+      ANALYSIS_OUTPUT_DIR: artifacts/bg-wire-review
+      ANALYSIS_DISCOVERY_CONCURRENCY: '1'
+      ANALYSIS_RUNTIME_VALIDATION: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: Prepare unresolved targets
+        run: |
+          cat > "$TARGET_FILE" <<'EOF'
+          https://demo.bgaming-network.com/play/GrandPatron7rst/FUN
+          https://demo.bgaming-network.com/play/RocketEruptionTripleBlast/FUN
+          https://demo.bgaming-network.com/play/StarTrekNextGen/FUN
+          https://demo.bgaming-network.com/play/SweetSamurai/FUN
+          https://demo.bgaming-network.com/play/TheGodfather3PillarsOfPower/FUN
+          EOF
+      - run: npm run analyze:targets
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bgaming-wire-review
+          path: artifacts/bg-wire-review/
+          retention-days: 1
