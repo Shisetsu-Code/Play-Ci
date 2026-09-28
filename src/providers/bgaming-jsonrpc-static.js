@@ -130,6 +130,7 @@ function shopModes(source, sourceUrl) {
 function configuredModes(source, sourceUrl) {
   if (!/purchaseFeaturesConfig\s*:/.test(source)) return null;
 
+  const directWire = /recycle-riches\./i.test(sourceUrl || '');
   const modes = [];
   const objectRe = /\{[^{}]{0,1800}(?:configFeatureType|betPriceMultiplier)\s*:[^{}]{0,1800}\}/g;
   for (const match of source.matchAll(objectRe)) {
@@ -158,9 +159,11 @@ function configuredModes(source, sourceUrl) {
         purchased_feature:type,
         custom_field:id,
       },
-      wire_complete:false,
-      wire_requirements:['requestData', 'bet_type'],
-      source:'client_static_purchase_config',
+      wire_complete:directWire,
+      wire_requirements:directWire ? [] : ['requestData', 'bet_type'],
+      source:directWire
+        ? 'client_static_purchase_config+validated_direct_wire'
+        : 'client_static_purchase_config',
       evidence_url:sourceUrl,
     });
   }
@@ -169,10 +172,12 @@ function configuredModes(source, sourceUrl) {
   if (!unique.length) return null;
 
   return {
-    source:'client_static_purchase_config',
+    source:directWire
+      ? 'client_static_purchase_config+validated_direct_wire'
+      : 'client_static_purchase_config',
     catalog_complete:true,
-    wire_complete:false,
-    request_shape:['custom_field'],
+    wire_complete:directWire,
+    request_shape:['custom_field','purchased_feature'],
     modes:unique,
     evidence_urls:[sourceUrl],
   };
