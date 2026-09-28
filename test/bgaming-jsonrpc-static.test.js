@@ -502,3 +502,29 @@ test('resolves StarTrek feature-buy flags across definitions and game client', (
   );
   assert.equal(profile.modes[0].request_fields.custom_req.exponent,'<CURRENCY_EXPONENT>');
 });
+
+
+test('RecycleRiches purchase config uses validated direct custom_field wire', () => {
+  const source=[
+    'purchaseFeaturesConfig:[',
+    '{id:"chance",type:"buy_chance",configFeatureType:"buy_chance",betPriceMultiplier:2},',
+    '{id:"buy_random",type:"buy_bonus",configFeatureType:"buy_bonus",price:100},',
+    '{id:"buy_max",type:"buy_bonus",configFeatureType:"buy_bonus",price:300}',
+    '],',
+    'sendPlay(e){return {req:{bet:e.bet,custom_field:e.feature.id,purchased_feature:e.feature.type}}}',
+  ].join('');
+  const profile=extractBgamingJsonRpcStaticProfile([
+    jsEvent(source,'https://recycle-riches.demo.bgaming-network.com/main.js'),
+  ]);
+  assert.equal(profile.catalog_complete,true);
+  assert.equal(profile.wire_complete,true);
+  assert.deepEqual(profile.request_shape,['custom_field','purchased_feature']);
+  assert.deepEqual(
+    profile.modes.map(x=>[x.id,x.wire_complete,x.request_fields]),
+    [
+      ['chance',true,{purchased_feature:'buy_chance',custom_field:'chance'}],
+      ['buy_random',true,{purchased_feature:'buy_bonus',custom_field:'buy_random'}],
+      ['buy_max',true,{purchased_feature:'buy_bonus',custom_field:'buy_max'}],
+    ],
+  );
+});
