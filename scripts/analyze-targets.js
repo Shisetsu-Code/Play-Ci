@@ -155,11 +155,14 @@ function bgamingStaticProfileScore(profile) {
   );
 }
 
-async function waitForBgamingJsonRpcStaticProfile(internal, timeoutMs = 5500) {
+async function waitForBgamingJsonRpcStaticProfile(internal, timeoutMs = 8500) {
   const deadline = Date.now() + timeoutMs;
   let best = extractBgamingJsonRpcStaticProfile(internal.recorder.eventsAfter(0));
 
-  if (best?.catalog_complete) return best;
+  // A catalog-complete profile may be discovered from definitions.json before
+  // the game bundle that explains the exact wire fields has finished loading.
+  // Do not stop at catalog completeness alone; prefer a wire-complete profile.
+  if (best?.catalog_complete && best?.wire_complete) return best;
 
   while (Date.now() < deadline) {
     await sleep(250);
@@ -167,7 +170,7 @@ async function waitForBgamingJsonRpcStaticProfile(internal, timeoutMs = 5500) {
     if (bgamingStaticProfileScore(candidate) > bgamingStaticProfileScore(best)) {
       best = candidate;
     }
-    if (best?.catalog_complete) return best;
+    if (best?.catalog_complete && best?.wire_complete) return best;
   }
 
   return best;
