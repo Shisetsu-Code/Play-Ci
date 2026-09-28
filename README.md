@@ -216,6 +216,8 @@ The intended ChatGPT workflow is:
 
 For 3 Oaks, the analyzer first extracts server-declared actions, normal bets, buy modes, buy prices, fixed/legacy buys, boosters and booster prices from `start`. That protocol evidence is the completeness map. Runtime proof is tiered: real visible clicks are strongest, native client methods may be used when they emit the real browser request, and fresh-session protocol replay is an explicitly lower proof tier for clients that cannot be rendered reliably on GitHub runners. A failed runtime path never removes a server-declared mode from the catalog.
 
+For BGaming, the analyzer recognizes v2, legacy, fixed-line launcher and JSON-RPC client generations. Normal bets come from captured bootstrap/init configuration; game-specific buys/chance modes come from provider fields and loaded client configuration rather than treating generic JSON-RPC capabilities as purchases. Public demo failures are isolated as `UNAVAILABLE_DEMO` instead of becoming false parser failures. See `docs/BGAMING_IMPLEMENTATION.md`.
+
 Local execution:
 
 ```powershell
@@ -290,7 +292,8 @@ For architecture, validation rules, historical pitfalls and a complete handoff f
 2. `docs/ARCHITECTURE.md`
 3. `docs/VALIDATION_POLICY.md`
 4. `docs/3OAKS_IMPLEMENTATION.md`
-5. `docs/OPERATIONS.md`
+5. `docs/BGAMING_IMPLEMENTATION.md`
+6. `docs/OPERATIONS.md`
 
 These documents are the durable source of truth for the project's objective. If an experimental script or old comment conflicts with them, the documents above take precedence.
 
@@ -307,3 +310,19 @@ Declared special modes: 126
 ```
 
 A verified exhaustive run at that baseline had runtime proof for 71 special modes. Runtime proof and catalog completeness are intentionally separate metrics. See `docs/3OAKS_IMPLEMENTATION.md` for the full history, failure modes and proof hierarchy.
+
+
+## Current BGaming baseline
+
+The current BGaming target set contains 215 URLs. The verified catalog baseline is:
+
+```text
+Targets: 215
+Catalog complete: 212
+Catalog requires review: 0
+Public demo unavailable: 3
+Declared buy modes: 319
+Declared booster/chance modes: 116
+```
+
+Recognized generations are `v2`, `legacy`, `legacy-fixed-lines`, and `jsonrpc`. The three unavailable targets are retained explicitly rather than assigned guessed bets. See `docs/BGAMING_IMPLEMENTATION.md`.
