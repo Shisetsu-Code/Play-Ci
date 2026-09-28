@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    paths-ignore:
+      - 'analysis/targets.txt'
+      - 'analysis/trigger.txt'
+  pull_request:
+    paths-ignore:
+      - 'analysis/targets.txt'
+      - 'analysis/trigger.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: npm run check
+      - run: python3 -m py_compile tools/analysis_gui.py
+      - run: npm test

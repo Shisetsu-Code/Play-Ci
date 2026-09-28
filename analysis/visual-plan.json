@@ -1,0 +1,278 @@
+{
+  "version": 1,
+  "jobs": [
+    {
+      "id": "hraymo-buy-1",
+      "url": "https://3oaks.com/api/v1/games/3_african_drums/play?lang=en",
+      "metadata": {
+        "family": "hraymo",
+        "purpose": "validate visible buy mode 1"
+      },
+      "steps": [
+        {
+          "type": "wait",
+          "ms": 4000,
+          "label": "loaded"
+        },
+        {
+          "type": "click",
+          "x": 640,
+          "y": 360,
+          "label": "dismiss-start",
+          "waitAfterMs": 2500
+        },
+        {
+          "type": "click",
+          "x": 135,
+          "y": 258,
+          "label": "open-buy",
+          "waitAfterMs": 1000
+        },
+        {
+          "type": "click",
+          "x": 460,
+          "y": 425,
+          "label": "buy-option-1",
+          "waitAfterMs": 1400
+        }
+      ]
+    },
+    {
+      "id": "hraymo-buy-2",
+      "url": "https://3oaks.com/api/v1/games/3_african_drums/play?lang=en",
+      "metadata": {
+        "family": "hraymo",
+        "purpose": "validate visible buy mode 2"
+      },
+      "steps": [
+        {
+          "type": "wait",
+          "ms": 4000,
+          "label": "loaded"
+        },
+        {
+          "type": "click",
+          "x": 640,
+          "y": 360,
+          "label": "dismiss-start",
+          "waitAfterMs": 2500
+        },
+        {
+          "type": "click",
+          "x": 135,
+          "y": 258,
+          "label": "open-buy",
+          "waitAfterMs": 1000
+        },
+        {
+          "type": "click",
+          "x": 820,
+          "y": 425,
+          "label": "buy-option-2",
+          "waitAfterMs": 1400
+        }
+      ]
+    },
+    {
+      "id": "ratpack-buy-1",
+      "url": "https://3oaks.com/api/v1/games/4_super_clover_pots/play?lang=en",
+      "metadata": {
+        "family": "ratpack",
+        "purpose": "validate visible buy mode 1"
+      },
+      "steps": [
+        {
+          "type": "wait",
+          "ms": 6500,
+          "label": "loaded"
+        },
+        {
+          "type": "click",
+          "x": 640,
+          "y": 360,
+          "label": "dismiss-start",
+          "waitAfterMs": 3000
+        },
+        {
+          "type": "click",
+          "x": 1195,
+          "y": 233,
+          "label": "open-bonus",
+          "waitAfterMs": 1000
+        },
+        {
+          "type": "click",
+          "x": 240,
+          "y": 515,
+          "label": "buy-option-1",
+          "waitAfterMs": 1400
+        }
+      ]
+    },
+    {
+      "id": "ratpack-buy-2",
+      "url": "https://3oaks.com/api/v1/games/4_super_clover_pots/play?lang=en",
+      "metadata": {
+        "family": "ratpack",
+        "purpose": "validate visible buy mode 2"
+      },
+      "steps": [
+        {
+          "type": "wait",
+          "ms": 6500,
+          "label": "loaded"
+        },
+        {
+          "type": "click",
+          "x": 640,
+          "y": 360,
+          "label": "dismiss-start",
+          "waitAfterMs": 3000
+        },
+        {
+          "type": "click",
+          "x": 1195,
+          "y": 233,
+          "label": "open-bonus",
+          "waitAfterMs": 1000
+        },
+        {
+          "type": "click",
+          "x": 462,
+          "y": 515,
+          "label": "buy-option-2",
+          "waitAfterMs": 1400
+        }
+      ]
+    },
+    {
+      "id": "ratpack-booster-1",
+      "url": "https://3oaks.com/api/v1/games/4_super_clover_pots/play?lang=en",
+      "metadata": {
+        "family": "ratpack",
+        "purpose": "validate visible booster mode 1"
+      },
+      "steps": [
+        {
+          "type": "wait",
+          "ms": 6500,
+          "label": "loaded"
+        },
+        {
+          "type": "click",
+          "x": 640,
+          "y": 360,
+          "label": "dismiss-start",
+          "waitAfterMs": 3000
+        },
+        {
+          "type": "click",
+          "x": 1195,
+          "y": 233,
+          "label": "open-bonus",
+          "waitAfterMs": 1000
+        },
+        {
+          "type": "click",
+          "x": 716,
+          "y": 486,
+          "label": "activate-booster-1",
+          "waitAfterMs": 1000
+        },
+        {
+          "type": "click",
+          "x": 1195,
+          "y": 350,
+          "label": "spin-with-booster",
+          "waitAfterMs": 1800
+        }
+      ]
+    },
+    {
+      "id": "ratpack-booster-2",
+      "url": "https://3oaks.com/api/v1/games/4_super_clover_pots/play?lang=en",
+      "metadata": {
+        "family": "ratpack",
+        "purpose": "validate visible booster mode 2"
+      },
+      "steps": [
+        {
+          "type": "wait",
+          "ms": 6500,
+          "label": "loaded"
+        },
+        {
+          "type": "click",
+          "x": 640,
+          "y": 360,
+          "label": "dismiss-start",
+          "waitAfterMs": 3000
+        },
+        {
+          "type": "click",
+          "x": 1195,
+          "y": 233,
+          "label": "open-bonus",
+          "waitAfterMs": 1000
+        },
+        {
+          "type": "click",
+          "x": 884,
+          "y": 486,
+          "label": "activate-booster-2",
+          "waitAfterMs": 1000
+        },
+        {
+          "type": "click",
+          "x": 1195,
+          "y": 350,
+          "label": "spin-with-booster",
+          "waitAfterMs": 1800
+        }
+      ]
+    },
+    {
+      "id": "ratpack-booster-3",
+      "url": "https://3oaks.com/api/v1/games/4_super_clover_pots/play?lang=en",
+      "metadata": {
+        "family": "ratpack",
+        "purpose": "validate visible booster mode 3"
+      },
+      "steps": [
+        {
+          "type": "wait",
+          "ms": 6500,
+          "label": "loaded"
+        },
+        {
+          "type": "click",
+          "x": 640,
+          "y": 360,
+          "label": "dismiss-start",
+          "waitAfterMs": 3000
+        },
+        {
+          "type": "click",
+          "x": 1195,
+          "y": 233,
+          "label": "open-bonus",
+          "waitAfterMs": 1000
+        },
+        {
+          "type": "click",
+          "x": 1052,
+          "y": 486,
+          "label": "activate-booster-3",
+          "waitAfterMs": 1000
+        },
+        {
+          "type": "click",
+          "x": 1195,
+          "y": 350,
+          "label": "spin-with-booster",
+          "waitAfterMs": 1800
+        }
+      ]
+    }
+  ]
+}

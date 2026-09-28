@@ -1,0 +1,45 @@
+name: Validate 3Oaks adapters
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      TARGET_FILE: /tmp/adapter-targets.txt
+      ANALYSIS_OUTPUT_DIR: artifacts/adapter-validation
+      ANALYSIS_RUNTIME_VALIDATION: '1'
+      ANALYSIS_VALIDATE_ALL_MODES: '0'
+      ANALYSIS_VALIDATE_BASE_SPIN: '0'
+      ANALYSIS_DISCOVERY_CONCURRENCY: '2'
+      ANALYSIS_VALIDATION_CONCURRENCY: '2'
+      ANALYSIS_VALIDATION_BATCH_SIZE: '2'
+      ANALYSIS_VALIDATION_BATCH_DELAY_MS: '0'
+      ANALYSIS_VALIDATION_READY_TIMEOUT_MS: '12000'
+      ANALYSIS_VALIDATION_ACTIVITY_TIMEOUT_MS: '5000'
+      ANALYSIS_MAX_PROVIDER_BLOCK_STREAK: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: Prepare representative targets
+        run: |
+          cat > /tmp/adapter-targets.txt <<'EOF'
+          https://3oaks.com/api/v1/games/4_super_clover_pots/play?lang=en
+          https://3oaks.com/api/v1/games/3_coin_volcanoes/play?lang=en
+          EOF
+      - run: npm run analyze:targets
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: 3oaks-adapter-validation
+          path: artifacts/adapter-validation/
+          retention-days: 1
