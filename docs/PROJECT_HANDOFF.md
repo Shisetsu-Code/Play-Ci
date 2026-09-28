@@ -76,6 +76,46 @@ A verified exhaustive run at that baseline had runtime proof for 71 special mode
 
 Do not claim a newer runtime-validated count until a full merged exhaustive artifact proves it.
 
+
+## Current BGaming state
+
+The current BGaming list contains 215 targets.
+
+Verified catalog baseline:
+
+```text
+Provider identified: 215/215
+Catalog complete: 212
+Catalog requires review: 0
+Public demo unavailable: 3
+Declared buy modes: 319
+Declared booster/chance modes: 116
+```
+
+Recognized generations:
+
+```text
+bgaming-v2: 168
+bgaming-jsonrpc: 29
+bgaming-legacy: 14
+bgaming-legacy-fixed-lines: 1
+bgaming-unavailable: 3
+```
+
+The unavailable public demos are `PrincessOfSky`, `PrincessRoyal`, and `ScrollOfAdventure`. BGaming's own public game pages still reference those historical demo URLs, but the demo service currently returns Page Not Found. Keep them `UNAVAILABLE_DEMO`; do not invent bet lists.
+
+Important BGaming files:
+
+```text
+src/providers/bgaming.js
+src/providers/bgaming-jsonrpc-static.js
+test/bgaming.test.js
+test/bgaming-jsonrpc-static.test.js
+docs/BGAMING_IMPLEMENTATION.md
+```
+
+Critical rule: JSON-RPC `config.purchased_features` is an engine capability list, not a game-specific purchase declaration. Only promote modes supported by game-specific client/bootstrap evidence.
+
 ## Current architecture
 
 ```text
@@ -280,9 +320,10 @@ Diagnostic scripts under `scripts/` preserve investigation history but are not p
 2. `docs/ARCHITECTURE.md`;
 3. `docs/VALIDATION_POLICY.md`;
 4. `docs/3OAKS_IMPLEMENTATION.md`;
-5. `docs/OPERATIONS.md`;
-6. inspect the current PR head;
-7. inspect the latest Actions artifacts.
+5. `docs/BGAMING_IMPLEMENTATION.md`;
+6. `docs/OPERATIONS.md`;
+7. inspect the current PR head;
+8. inspect the latest Actions artifacts.
 
 Do not restart the provider investigation from scratch.
 
