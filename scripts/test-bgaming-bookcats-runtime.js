@@ -11,15 +11,9 @@ const URL='https://demo.bgaming-network.com/play/BookOfCatsMegaways/FUN?server=d
 const service=new BrowserService(config);
 const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
 
-function balanceValue(body) {
-  const b=body?.balance;
-  if (Number.isFinite(Number(b))) return Number(b);
-  if (b && typeof b==='object') {
-    const wallet=Number(b.wallet||0);
-    const game=Number(b.game||0);
-    if (Number.isFinite(wallet) && Number.isFinite(game)) return wallet+game;
-  }
-  return null;
+function walletValue(body) {
+  const wallet=Number(body?.balance?.wallet);
+  return Number.isFinite(wallet) ? wallet : null;
 }
 
 async function fresh() {
@@ -70,10 +64,15 @@ async function executeCase(name, blueprint, expectedMultiplier) {
     try { body=JSON.parse(text); }
     catch { body={raw:text.slice(0,4000)}; }
 
-    const before=balanceValue(start.body);
-    const after=balanceValue(body);
-    const costRaw=Number.isFinite(before)&&Number.isFinite(after) ? before-after : null;
-    const ratio=Number.isFinite(costRaw)&&Number(bet)>0 ? costRaw/Number(bet) : null;
+    const beforeWallet=walletValue(start.body);
+    const afterWallet=walletValue(body);
+    const costRaw=Number.isFinite(beforeWallet)&&Number.isFinite(afterWallet)
+      ? beforeWallet-afterWallet
+      : null;
+    const ratio=Number.isFinite(costRaw)&&Number(bet)>0
+      ? costRaw/Number(bet)
+      : null;
+
     const http=response.status();
     const errors=body?.errors ?? body?.error ?? null;
     const accepted=http>=200&&http<300&&!errors;
@@ -81,24 +80,38 @@ async function executeCase(name, blueprint, expectedMultiplier) {
       ? Math.abs(ratio-expectedMultiplier)<1e-9
       : null;
 
+    const expectedFeature=blueprint.feature||null;
+    const observedFeature=body?.flow?.purchased_feature?.name ?? null;
+    const featureMatches=expectedFeature
+      ? observedFeature===expectedFeature
+      : observedFeature==null;
+
+    const flowCommandMatches=body?.flow?.command==='spin';
+    const semanticMatch=flowCommandMatches&&featureMatches;
+
     return {
       name,
       kind:blueprint.kind,
-      feature:blueprint.feature||null,
+      feature:expectedFeature,
       expected_multiplier:expectedMultiplier,
       bet_raw:bet,
       payload,
       endpoint:start.request.url,
       http_status:http,
       accepted,
-      before_balance:before,
-      after_balance:after,
+      before_wallet:beforeWallet,
+      after_wallet:afterWallet,
+      game_balance:Number(body?.balance?.game ?? 0),
       cost_raw:costRaw,
       observed_multiplier:ratio,
       multiplier_match:ratioMatches,
-      verdict: accepted && ratioMatches===true
+      observed_feature:observedFeature,
+      feature_match:featureMatches,
+      flow_command_match:flowCommandMatches,
+      semantic_match:semanticMatch,
+      verdict: accepted && ratioMatches===true && semanticMatch
         ? 'PASS'
-        : accepted && ratioMatches===null
+        : accepted && ratioMatches===null && semanticMatch
           ? 'ACCEPTED_COST_UNKNOWN'
           : accepted
             ? 'MISMATCH'
@@ -106,7 +119,6 @@ async function executeCase(name, blueprint, expectedMultiplier) {
       response_keys:body&&typeof body==='object'?Object.keys(body):[],
       errors,
       flow:body?.flow??null,
-      game:body?.game??null,
       response:body,
     };
   } finally {
@@ -149,7 +161,9 @@ try {
     default_bet_display:protocol.default_bet_display,
     declared_special_modes:protocol.special_modes,
     blueprints:blueprints.map(x=>({
-      id:x.id,kind:x.kind,feature:x.feature||null,
+      id:x.id,
+      kind:x.kind,
+      feature:x.feature||null,
       declared_multiplier:x.declared_multiplier??1,
       request_template:x.request_template,
     })),
@@ -161,7 +175,12 @@ try {
       expected_multiplier:r.expected_multiplier,
       observed_multiplier:r.observed_multiplier??null,
       multiplier_match:r.multiplier_match??null,
+      expected_feature:r.feature??null,
+      observed_feature:r.observed_feature??null,
+      feature_match:r.feature_match??null,
+      semantic_match:r.semantic_match??null,
       cost_raw:r.cost_raw??null,
+      game_balance:r.game_balance??null,
       errors:r.errors??null,
     })),
     all_pass:results.length===4&&results.every(r=>r.verdict==='PASS'),
